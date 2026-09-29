@@ -12,6 +12,8 @@ from enum import StrEnum
 from typing import Literal, Protocol, Sequence
 
 from baton.interfaces.types import (
+    BridgeEvent,
+    CheckId,
     CheckResult,
     Completion,
     ExtractResult,
@@ -23,6 +25,8 @@ from baton.interfaces.types import (
     Preferences,
     RecallTrace,
     Alert,
+    PatchStat,
+    WhyAnswer,
 )
 
 # ---------------------------------------------------------------- models
@@ -31,7 +35,7 @@ from baton.interfaces.types import (
 class ModelProfile(Frozen):
     id: str  # "groq:openai/gpt-oss-120b"
     label: str  # "gpt-oss-120b · Groq"
-    provider: Literal["groq", "gemini"]
+    provider: Literal["groq", "gemini", "openai"]
     model: str  # the provider's own model name
     base_url: str
     burstable: bool  # Groq models only
@@ -163,6 +167,16 @@ class Store(Protocol):
     def add_items(self, items: Sequence[Item]) -> None: ...
     def replace_turn_items(self, session_id: str, turn: int, items: Sequence[Item]) -> None: ...
     def items(self, session_id: str) -> list[Item]: ...
+    def project_items(self, project: str) -> list[Item]: ...
+
+    def log_bridge_event(self, event: BridgeEvent) -> None: ...
+    def bridge_events(self, project: str, limit: int = 50) -> list[BridgeEvent]: ...
+
+    def record_check(self, model: str, check_id: CheckId, level: int, passed: bool) -> None: ...
+    def patch_stats(self, model: str | None = None) -> list[PatchStat]: ...
+    def first_attempt_rates(
+        self, project: str
+    ) -> list[tuple[str, str, datetime, int, int]]: ...
 
     def log_handoff(self, session_id: str, turn: int, event: HandoffEvent) -> None: ...
     def handoffs(self, session_id: str) -> list[tuple[int, HandoffEvent]]: ...
@@ -185,6 +199,10 @@ class LongTermMemory(Protocol):
     def snapshot(self, project: str, *, timeout: float = 5.0) -> L2Snapshot:
         """Recall the project's state and ledger items (rebuilt from metadata, not recalled text).
         Timeout -> LTM_UNAVAILABLE alert; 402 -> LTM_NO_CREDITS alert."""
+        ...
+
+    def why(self, project: str, approach: str) -> WhyAnswer:
+        """Reflect on a rejection with a 20 s timeout. Never raises."""
         ...
 
 

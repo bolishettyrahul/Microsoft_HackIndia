@@ -13,7 +13,9 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict
 
-CONTRACT_VERSION = "2h-1.0"
+CONTRACT_VERSION = "2h-3.0"
+
+BridgeApp = Literal["chatgpt", "claude", "baton"]
 
 
 class Frozen(BaseModel):
@@ -52,6 +54,10 @@ class CheckId(StrEnum):
     REJECTED = "rejected"
     CONTINUITY = "continuity"
     NO_BULLETS = "no_bullets"
+    MAX_WORDS = "max_words"
+    NO_EMOJIS = "no_emojis"
+    NO_PREAMBLE = "no_preamble"
+    CODE_LANGUAGE = "code_language"
 
 
 class Item(Frozen):
@@ -75,6 +81,10 @@ class Item(Frozen):
 
 class Preferences(Frozen):
     no_bullets: bool = False
+    max_words: int | None = None
+    no_emojis: bool = False
+    no_preamble: bool = False
+    code_languages: tuple[str, ...] | None = None
     free_text: tuple[str, ...] = ()  # stated in chat but not verifiable
 
 
@@ -95,6 +105,20 @@ class CheckResult(Frozen):
     check_id: CheckId
     status: Literal["pass", "fail", "n/a"]
     evidence: str = ""
+
+
+class PatchStat(Frozen):
+    model: str
+    check_id: CheckId
+    level: int
+    passes: int
+    trials: int
+
+
+class WhyAnswer(Frozen):
+    text: str | None
+    sources: tuple[str, ...] = ()
+    error: str | None = None
 
 
 class AlertCode(StrEnum):
@@ -121,6 +145,16 @@ class HandoffEvent(Frozen):
     retry_after: float | None = None
     memories_recalled: int = 0
     at: datetime
+
+
+class BridgeEvent(Frozen):
+    at: datetime
+    project: str
+    app: BridgeApp
+    action: Literal["pull", "record", "check", "import"]
+    summary: str
+    items: int = 0
+    passed: bool | None = None
 
 
 class RecallTrace(Frozen):

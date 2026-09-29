@@ -11,7 +11,7 @@ Check the current branch (`git branch --show-current`):
 
 | Branch | Sector | You may edit | You must not edit |
 | --- | --- | --- | --- |
-| `worktree-ai` | AI | `baton/ai/**`, `tests/ai/**` | everything else |
+| `worktree-ai` or `ai` | AI | `baton/ai/**`, `tests/ai/**`, `tests/live/**` | everything else |
 | `worktree-backend` | Backend | `baton/backend/**`, `tests/backend/**` | everything else |
 | `worktree-frontend` | Frontend | `web/**` except `web/src/api/contract.ts` | everything else |
 | `main` | Integration | contracts, config, docs, README | sector code, except integration fixes |
@@ -37,7 +37,10 @@ web/ (React) --HTTP /api--> baton/backend/ (FastAPI + turn loop) --AIServices-->
 - Hindsight retain per turn, and recall at session start and handoff. If Hindsight fails, fall back to SQLite with an alert.
 - Tabs: Baton (the contract, with Copy baton), Ledger (with reverse), and Memory trace.
 
-**Out:** the patch statistics and learning chart, seeding, the team view, "Why?", Ollama, and the full conformance suites.
+**Also in after contracts v3:** bridge persistence, the optional OpenAI provider seam,
+patch statistics and first-attempt learning rates, and Hindsight-backed "Why?".
+
+**Out:** Ollama and the full conformance suites.
 
 ## Rules for every sector
 
