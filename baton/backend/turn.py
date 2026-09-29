@@ -266,7 +266,10 @@ class TurnRunner:
                 if isinstance(exc, RateLimited):
                     self.ai.chain.cool_down(model_id, exc.retry_after)
                 else:
-                    self.ai.chain.disable(model_id, exc.detail)
+                    if exc.reason == "auth":
+                        self.ai.chain.disable(model_id, exc.detail or "authentication failed")
+                    elif exc.reason == "error":
+                        self.ai.chain.cool_down(model_id, 30.0)
                     alerts.append(Alert(
                         level="red" if exc.reason == "auth" else "amber",
                         code=AlertCode.MODEL_UNAVAILABLE,
@@ -295,7 +298,12 @@ class TurnRunner:
                 continue
 
             text = strip_reasoning(completion.text)
-            seen_model = any(value.model == model_id and value.attempt != "user" for value in records)
+            seen_model = any(
+                value.model == model_id
+                and value.attempt != "user"
+                and value.turn < turn
+                for value in records
+            )
             results = verify(text, state, continuity=state.has_context and not seen_model)
             first = self._save_reply(
                 session, turn, model_id, text, "rerun" if rerun else "first", memory_on, results

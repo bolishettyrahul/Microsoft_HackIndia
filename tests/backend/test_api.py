@@ -2,9 +2,19 @@ from fastapi.testclient import TestClient
 
 from baton.backend.app import create_app
 from baton.backend.facade import Baton
+from baton.backend.wiring import build_baton
 from baton.config import Settings
-from baton.interfaces.errors import RateLimited
-from baton.interfaces.types import CheckId, ExtractedItem, ExtractResult
+from baton.interfaces.ai import ModelState
+from baton.interfaces.errors import ModelUnavailable, RateLimited
+from baton.interfaces.types import (
+    CheckId,
+    ExtractedItem,
+    ExtractResult,
+    Item,
+    ItemKind,
+    new_id,
+    utcnow,
+)
 from .fakes import FakeModel, services
 
 
@@ -81,3 +91,65 @@ def test_unknown_session_is_404():
     client, _ai = client_for([FakeModel("groq:model-a", "unused")])
     response = client.get("/api/sessions/missing")
     assert response.status_code == 404
+
+
+def test_wiring_honours_fake_mode_without_provider_keys():
+    api = build_baton(Settings(ai="fake"))
+    assert api.health().ai == "fake"
+    assert api.health().models
+
+
+def test_transient_model_error_cools_instead_of_disabling_and_hands_off():
+    first = FakeModel(
+        "groq:model-a",
+        ModelUnavailable("groq:model-a", "error", "temporary 500"),
+    )
+    second = FakeModel("gemini:model-b", "Fallback response")
+    client, _ai = client_for([first, second], ExtractResult())
+    sid = client.post("/api/sessions", json={"project": "demo", "user": "Dev"}).json()["session_id"]
+
+    body = client.post(f"/api/sessions/{sid}/turns", json={"text": "Continue"}).json()
+    statuses = client.get(f"/api/sessions/{sid}/models").json()
+
+    assert body["reply"]["model_id"] == "gemini:model-b"
+    first_status = next(value for value in statuses if value["model_id"] == "groq:model-a")
+    assert first_status["state"] == ModelState.COOLING
+
+
+def test_transcript_is_restored_from_store_after_backend_restart():
+    model = FakeModel("groq:model-a", "Persistent response")
+    client, ai = client_for([model], ExtractResult())
+    sid = client.post("/api/sessions", json={"project": "demo", "user": "Dev"}).json()["session_id"]
+    original = client.post(f"/api/sessions/{sid}/turns", json={"text": "Persist me"}).json()
+
+    restarted = Baton(Settings(ai="fake"), ai)
+    restored = restarted.turns(sid)
+
+    assert len(restored) == 1
+    assert restored[0].user_text == "Persist me"
+    assert restored[0].reply is not None
+    assert restored[0].reply.text == original["reply"]["text"]
+    assert restored[0].reply.message_id == original["reply"]["message_id"]
+
+
+def test_rerun_keeps_continuity_check_for_models_first_turn():
+    model = FakeModel("groq:model-a", "Continue with the endpoint.", "What is the project?")
+    client, ai = client_for([model], ExtractResult(), ExtractResult())
+    sid = client.post("/api/sessions", json={"project": "demo", "user": "Dev"}).json()["session_id"]
+    ai.store.add_items((Item(
+        id=new_id(),
+        kind=ItemKind.GOAL,
+        text="Build a FastAPI cache",
+        session_id=sid,
+        project="demo",
+        user="Dev",
+        turn=0,
+        created_at=utcnow(),
+    ),))
+    client.post(f"/api/sessions/{sid}/turns", json={"text": "Continue"})
+
+    rerun = client.post(f"/api/sessions/{sid}/rerun").json()
+    continuity = next(
+        chip for chip in rerun["reply"]["chips"] if chip["check_id"] == "continuity"
+    )
+    assert continuity["passed"] is False
