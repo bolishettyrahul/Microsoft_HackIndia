@@ -311,7 +311,10 @@ class HindsightLongTermMemory:
                 bank_id=bank,
                 items=batch,
                 document_id=document_id,
-                retain_async=True,
+                # Hindsight rejects async batches whose items share a document id.
+                # This call already runs off the request path on MemoryService's
+                # thread, so server-side synchronous processing does not add UI latency.
+                retain_async=False,
             )
 
         self._service.fire(operation)

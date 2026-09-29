@@ -88,6 +88,7 @@ def test_retain_and_snapshot_round_trip_metadata() -> None:
         assert [trace.purpose for trace in snapshot.traces] == ["state", "ledger"]
         assert snapshot.alerts == ()
         assert client.retained[0]["document_id"] == "session:1"
+        assert client.retained[0]["retain_async"] is False
     finally:
         memory.close()
 

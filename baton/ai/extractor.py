@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from collections.abc import Sequence
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -50,8 +52,32 @@ def strict_schema() -> dict[str, Any]:
     """Return the strict JSON schema sent to structured-output providers."""
     schema = _TurnItems.model_json_schema()
 
+    def collapse_nullable(value: dict[str, Any]) -> None:
+        options = value.get("anyOf")
+        if not isinstance(options, list) or len(options) != 2:
+            return
+        nulls = [option for option in options if option.get("type") == "null"]
+        non_nulls = [option for option in options if option.get("type") != "null"]
+        if len(nulls) != 1 or len(non_nulls) != 1:
+            return
+        option = deepcopy(non_nulls[0])
+        reference = option.pop("$ref", None)
+        if reference and reference.startswith("#/$defs/"):
+            option.update(deepcopy(schema["$defs"][reference.rsplit("/", 1)[-1]]))
+        item_type = option.get("type")
+        if isinstance(item_type, str):
+            option["type"] = [item_type, "null"]
+        if isinstance(option.get("enum"), list) and None not in option["enum"]:
+            option["enum"].append(None)
+        title = value.get("title")
+        value.clear()
+        value.update(option)
+        if title and "title" not in value:
+            value["title"] = title
+
     def visit(value: Any) -> None:
         if isinstance(value, dict):
+            collapse_nullable(value)
             if value.get("type") == "object" or "properties" in value:
                 value["additionalProperties"] = False
                 properties = value.get("properties", {})
@@ -90,15 +116,68 @@ def _normalise_aliases(values: Sequence[str], text: str) -> tuple[str, ...]:
     return tuple(aliases)
 
 
+_EXPLICIT_REJECTION = re.compile(
+    r"(?i)(?:^|(?<=[.;!?]))\s*(?:no|avoid|do\s+not\s+use|don't\s+use)\s+"
+    r"(?P<approach>[a-z0-9][a-z0-9 _+./-]{0,60}?)"
+    r"(?=\s*(?:,|;|[.!?\n]|\bbecause\b|\bsince\b|$))"
+)
+_PREFERENCE_REJECTIONS = {"bullets", "bullet lists", "emojis", "preamble"}
+
+
+def _ensure_explicit_rejections(
+    user_msg: str,
+    items: Sequence[ExtractedItem],
+) -> tuple[ExtractedItem, ...]:
+    """Deterministically preserve direct user rejections a model omitted."""
+    result = list(items)
+    existing = {
+        value.casefold()
+        for item in result
+        if item.kind == "rejection"
+        for value in (item.text, *item.aliases)
+    }
+    for match in _EXPLICIT_REJECTION.finditer(user_msg):
+        approach = " ".join(match.group("approach").split()).strip()
+        key = approach.casefold()
+        if not approach or key in _PREFERENCE_REJECTIONS or key in existing:
+            continue
+        tail = user_msg[match.end():]
+        reason_match = re.match(
+            r"(?i)^\s*(?:,?\s*(?:because|since)\s+|,\s*)(?P<reason>[^;.!?\n]+)",
+            tail,
+        )
+        reason = None
+        if reason_match:
+            candidate = " ".join(reason_match.group("reason").split()).strip()
+            if any(
+                marker in candidate.casefold()
+                for marker in ("free tier", "budget", "cost", "cannot", "can't", "must", "limit")
+            ):
+                reason = candidate
+        result.append(
+            ExtractedItem(
+                kind="rejection",
+                text=approach,
+                reason=reason,
+            )
+        )
+        existing.add(key)
+    return tuple(result)
+
+
 class StructuredExtractor:
     """Extract typed items, with validation retry and provider fallback."""
 
     _SYSTEM = (
         "Extract only facts that the USER explicitly stated, accepted, rejected, "
         "reversed, or asked to do next. Never turn an assistant suggestion into a "
-        "decision unless the user accepted it. For rejection aliases, include only "
-        "short equivalent names. Return JSON matching the supplied schema. All fields "
-        "are required; use null for absent optional values and [] for no aliases."
+        "decision unless the user accepted it. A user saying 'no X', 'do not use X', "
+        "'avoid X', or choosing an alternative instead of X is a rejection of X; the "
+        "rejection text must name X, and a nearby because/free-tier clause is its "
+        "reason. Record separate constraints and accepted alternatives as additional "
+        "items. For rejection aliases, include only short equivalent names. Return JSON "
+        "matching the supplied schema. All fields are required; use null for absent "
+        "optional values and [] for no aliases."
     )
 
     def __init__(self, models: Sequence[ChatModel]) -> None:
@@ -160,7 +239,10 @@ class StructuredExtractor:
                     for item in parsed.items
                     if item.text.strip()
                 )
-                return ExtractResult(items=items, extractor_model=completion.model_id)
+                return ExtractResult(
+                    items=_ensure_explicit_rejections(user_msg, items),
+                    extractor_model=completion.model_id,
+                )
 
         detail = "; ".join(errors[-3:]) or "no extractor model is configured"
         return ExtractResult(

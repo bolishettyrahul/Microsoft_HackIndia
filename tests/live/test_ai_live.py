@@ -48,7 +48,9 @@ def test_each_chat_model_returns_text(model_id: str) -> None:
 
     result = model.complete(
         [Message(role="user", content="Reply with exactly: baton-ready")],
-        max_tokens=40,
+        # Gemini 3.x always thinks and can consume a tiny completion allowance
+        # without emitting visible text. Production uses a 1,024-token cap.
+        max_tokens=256 if model.profile.provider == "gemini" else 40,
     )
 
     assert result.text.strip()
