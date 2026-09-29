@@ -23,7 +23,7 @@ Last updated 2026-09-29, 22:30 IST. Submission is due at about 00:15 IST on 2026
    - `baton/config.py` reads settings from `.env`.
    - Project files: `requirements.txt`, `.env.example`, `pyproject.toml` and `.gitignore`.
    - The root `CLAUDE.md` maps each branch to its sector, lists the files each sector owns, and sets the cut-down scope.
-3. **Worktrees:** `frontend` already exists at `.claude/worktrees/frontend`. It was locked by an earlier Claude session that had stopped, so the lock is released as part of this commit.
+3. **Worktrees & Branches:** `frontend` worktree exists at `.claude/worktrees/frontend` (fast-forwarded to `main`). Branches `worktree-ai`, `worktree-backend`, `worktree-frontend` (and convenience aliases `ai`, `backend`, `frontend`) have been created at `18f126f` and pushed to remote `origin`.
 
 ## Scope for the submission
 
