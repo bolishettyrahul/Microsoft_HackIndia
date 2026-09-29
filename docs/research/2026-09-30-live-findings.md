@@ -6,12 +6,12 @@
 
 | Check | Provider/model | Result |
 | --- | --- | --- |
-| Chat completion | Groq `openai/gpt-oss-120b` | Non-empty response, 483 ms |
-| Chat completion | Gemini `gemini-3.5-flash` | Non-empty response, 1,738 ms |
-| Chat completion | Groq `qwen/qwen3.8-27b` | Non-empty response, 504 ms |
+| Chat completion | Groq `openai/gpt-oss-120b` | Non-empty response, 455 ms |
+| Chat completion | Gemini `gemini-3.5-flash` | Non-empty response, 2,964 ms |
+| Chat completion | Groq `qwen/qwen3.8-27b` | Non-empty response, 306 ms |
 | Structured extraction | Groq `openai/gpt-oss-20b` | Rejection and reason extracted |
 | Structured extraction | Gemini `gemini-3.5-flash-lite` | Rejection and reason extracted |
-| Long-term memory | Hindsight | Typed items retained and recalled in 5.84 s; reflection returned eight sources |
+| Long-term memory | Hindsight | Typed items retained and recalled in 7.92 s; reflection returned nine sources |
 
 Repeated Hindsight retain-to-recall samples during implementation ranged from about 5.7 to 9.0 seconds, so the UI and tests should continue to poll rather than assume immediate indexing.
 
@@ -26,7 +26,7 @@ Repeated Hindsight retain-to-recall samples during implementation ranged from ab
 
 - Item ids, kinds, aliases, session/project identity, user, turn, model, source, and timestamps round-trip through metadata.
 - Hindsight rejects an asynchronous batch when multiple items share one document id. Baton therefore performs the server-side batch synchronously on its dedicated memory thread; the user request remains non-blocking.
-- `why()` works through `reflect` with rejection, reversal, decision, and constraint tags. The real check returned an answer grounded in eight memory sources.
+- `why()` works through `reflect` with rejection, reversal, decision, and constraint tags. The post-merge check returned an answer grounded in nine memory sources.
 - Timeouts, unavailable service responses, and HTTP 402 are converted to visible data objects rather than raised into the app.
 
 ## Deliberately not exercised
