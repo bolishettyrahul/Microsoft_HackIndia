@@ -16,6 +16,7 @@ def _split(value: str) -> tuple[str, ...]:
 class Settings:
     groq_api_key: str | None = None
     gemini_api_key: str | None = None
+    openai_api_key: str | None = None
     hindsight_api_key: str | None = None
     hindsight_base_url: str = "https://api.hindsight.vectorize.io"
     model_chain: tuple[str, ...] = (
@@ -31,6 +32,8 @@ class Settings:
     db_path: str = "baton.db"
     history_window: int = 6
     recall_timeout: float = 5.0
+    mcp_token: str = "local-dev-token"
+    public_url: str | None = None
     extra: dict[str, str] = field(default_factory=dict)
 
 
@@ -41,6 +44,7 @@ def load_settings() -> Settings:
     return Settings(
         groq_api_key=os.getenv("GROQ_API_KEY") or None,
         gemini_api_key=os.getenv("GEMINI_API_KEY") or None,
+        openai_api_key=os.getenv("OPENAI_API_KEY") or None,
         hindsight_api_key=os.getenv("HINDSIGHT_API_KEY") or None,
         hindsight_base_url=os.getenv("HINDSIGHT_BASE_URL") or defaults.hindsight_base_url,
         model_chain=_split(os.getenv("BATON_MODEL_CHAIN", "")) or defaults.model_chain,
@@ -48,4 +52,7 @@ def load_settings() -> Settings:
         ai=os.getenv("BATON_AI", defaults.ai),
         db_path=os.getenv("BATON_DB_PATH", defaults.db_path),
         history_window=int(os.getenv("BATON_HISTORY_WINDOW", defaults.history_window)),
+        recall_timeout=float(os.getenv("BATON_RECALL_TIMEOUT", defaults.recall_timeout)),
+        mcp_token=os.getenv("BATON_MCP_TOKEN") or defaults.mcp_token,
+        public_url=os.getenv("BATON_PUBLIC_URL") or None,
     )

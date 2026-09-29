@@ -474,6 +474,215 @@ P2: only if P1 is done.
 
 **v2, in priority order:** a browser extension that injects the baton into claude.ai and chatgpt.com; the team view with per-person decision history; the bandit; embedding-based rejection matching.
 
+## 13. v3 backlog (noted 30 Sep)
+
+**v2 moved Baton from owning the model call to being a cooperative MCP tool; v3's job is to win enforcement back and prove the value with numbers.** The v2 fixes come first because they block the demo or open a security hole.
+
+### v2 fixes before the finale
+
+| Issue | Why it matters | Fix |
+| --- | --- | --- |
+| ChatGPT write actions need Business, Enterprise or Edu; Pro is read/fetch only ([OpenAI](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt)) | The ChatGPT lane may not write on a personal plan | Import box is the primary ChatGPT path; MCP writes shown as "works on Business plans"; rehearse the write-confirmation dialog |
+| `check_reply` is voluntary | The model decides whether to verify itself; skipped replies are invisible to Baton | Show **check coverage** (checks ÷ pulls) on the Bridge page and report it honestly |
+| Public MCP endpoint with no auth | Anyone with the tunnel URL reads or writes the contract | Bearer token (or secret path, flagged as debt) |
+| `record_items` accepts any model's write | Memory poisoning: a web page read by Claude can plant a fake decision ([OWASP MCP tool poisoning](https://owasp.org/www-community/attacks/MCP_Tool_Poisoning)) | `source` on every item (client, turn), shown on the timeline, one-click revoke |
+| Two lanes write at once | Last-writer-wins silently drops a `next_step` | Contract = projection of the append-only bridge event log |
+| Several projects, one phrase | "pick up the baton" may load the wrong bank | Default to last-used project; `pull_baton` names the project it loaded |
+
+### v3 features, severity-first
+
+- [ ] **P0 Evidence:** handoff eval set of \~30 scripted sessions; metrics: continuity, rejections respected, check coverage, per client
+- [ ] **P0 Trust:** item provenance, user confirmation for rejections and reversals, append-only event log
+- [ ] **P1 Enforcement:** OpenAI-compatible gateway proxy (Cursor, Cline, Aider point their base URL at it) so every reply passes the verifier
+- [ ] **P1 Matching:** paraphrase-aware rejection matching (embeddings + negation), measured for precision and recall on a labelled set
+- [ ] **P2 Handoff Lab:** R&D-Agent(Q)-style loop that backtests briefing strategies on the eval set
+
+| Integration route | Enforced? | Covers | Effort |
+| --- | --- | --- | --- |
+| MCP bridge (v2) | No, voluntary | claude.ai, Claude Desktop, ChatGPT Business | Done |
+| Gateway proxy | Yes, every reply | IDE and API tools | Medium, Python |
+| Browser extension | Captures only, can't block | claude.ai, chatgpt.com | High, JavaScript, brittle DOM |
+
+## 14. SDLC research: where the pain actually is
+
+**Across the software lifecycle, the recurring problem is not that context gets lost; it's that decisions aren't enforced when the next change happens.** Memory tools already solve storage. Baton's verifier is the part that solves enforcement, so that's the part to grow.
+
+The strongest single data point: in [20,574 real coding-agent sessions](https://arxiv.org/html/2605.29442v2), constraint violations were the most common misalignment (38.33%), 91.49% of visible resolutions still needed an explicit user correction, and constraint violations *grew* as a share of failures over time. The second most common failure was inaccurate self-reporting (22.58%), which is exactly why a model checking itself through `check_reply` can't be trusted on its own.
+
+| Stage | Problem | Evidence | What Baton's engine could do | Effort |
+| --- | --- | --- | --- | --- |
+| Specs and planning | Specs drift from code; nobody knows what the code looked like when a spec was written | Open [Kiro backlog issue](https://github.com/kirodotdev/Kiro/issues/9435); [SpecGov's `SPEC_IMPACT_MISSING` check](https://dev.to/paladini/your-specs-are-lying-how-to-detect-documentation-drift-in-every-pull-request-41p7) | Anchor each decision to the git commit it was made at; flag decisions whose files have changed since | Medium |
+| Architecture | ADRs are written and never read; stale ones actively mislead | ["Static, point-in-time documents asked to perform a living-artefact function"](https://www.javacodegeeks.com/2026/05/the-reason-most-architecture-decision-records-get-written-and-never-read-is-architectural-not-cultural.html); the proposed fix is coupling decisions to executable enforcement | The ledger as living ADRs: decisions and rejections with supersession history in Hindsight, checked at change time | Low: mostly built |
+| Coding with agents | Agents break stated constraints; users correct them by hand | [38.33% constraint violations; 91.49% need user correction](https://arxiv.org/html/2605.29442v2) | Verifier on every reply | Done in v1 |
+| Agent self-reports | Agents misreport what they did | [22.58% inaccurate self-reporting](https://arxiv.org/html/2605.29442v2) | Verify outside the model (gateway, CI), not by asking it | Medium |
+| Stale context | An outdated context file produces confident, wrong code (JWT middleware after a move to OAuth) | [Augment Code](https://www.augmentcode.com/guides/why-ai-agents-repeat-questions) | Reversal events: recall returns the current decision and marks the old one superseded | Low |
+| Code review | AI-heavy teams merge more and bigger PRs; review becomes the bottleneck | [Faros, 10,000+ developers: review time +91%, PR size +154%, bugs +9%](https://www.faros.ai/blog/ai-software-engineering) | A CI check that compares a PR diff against the ledger and comments with the reason and source | Medium |
+| Delivery stability | AI adoption links to higher throughput but lower stability; control systems are the fix | [DORA 2025](https://cloud.google.com/blog/products/ai-machine-learning/announcing-the-2025-dora-report); 30% have little or no trust in AI code | Pitch Baton as a control system for decisions | Pitch only |
+| Knowledge search | 61% of developers spend over 30 minutes a day searching for answers | Stack Overflow 2024, via [Sourcegraph](https://sourcegraph.com/blog/developer-onboarding) | "Why is it like this?" answered by `reflect` over the ledger | Low |
+
+**The reframe for the pitch:** "Memory stores what you decided. Baton enforces it on the next change, whoever or whatever makes it."
+
+### Recommended v3 extension: Decision Guard for pull requests
+
+A GitHub Action reads the project's ledger and checks each PR diff against active rejections and constraints. Example: a PR adds `redis` to `requirements.txt` while "Redis: rejected, free tier" is active, so the check comments with the reason, the date, and whether a person or which model recorded it. Whether the author overrides or accepts it is retained to Hindsight, so the guard learns which rules the team actually stands by.
+
+| Extension | Evidence behind it | Deterministic? | Demo value | Effort |
+| --- | --- | --- | --- | --- |
+| **Decision Guard for PRs** | Review bottleneck, constraint violations | Yes: dependency files and imports, high precision | High: a red check on a real PR | Medium, Python |
+| Gateway proxy | Constraint violations, self-reporting | Yes, per reply | Medium | Medium |
+| Git-ref drift anchoring | Spec drift | Yes | Medium | Medium |
+| Onboarding Q&A via reflect | Search time | No, LLM answer | Low: looks like every RAG demo | Low |
+
+**Habit check:** don't try to cover every stage. Pick one extension (Decision Guard) and measure it; breadth across the lifecycle will read as a slide, not a product.
+
+**Evidence caveats:** Faros and Augment sell tools in this space; the 20,574-session study is a preprint; Augment's "19% slower" figure comes from a 2025 study of 16 developers. Use the numbers, but name the source when you quote them.
+
+## 15. Decision Guard: design and build plan
+
+**Decision Guard is a GitHub check that fails or flags a pull request when its diff contradicts an active decision in Baton's ledger, and learns from how the author responds.** It extends the same rule as the reply verifier: an LLM may propose a rule, a person confirms it, and plain code enforces it.
+
+It also joins Baton's two halves. A rejection made in a ChatGPT or Claude chat becomes a check on real code, and an override on a PR becomes a new decision that the next model pulls.
+
+&#91;embedded content: Decision Guard loop · ledger to PR check and back\]
+
+The checker is the accent box because it's the only step that decides pass or fail, and it never calls a model.
+
+### Rule types
+
+Only rule kinds that code can check with high precision can block a merge. Everything fuzzier is advisory.
+
+| Kind | Comes from | How the diff is checked | Example | Can block? |
+| --- | --- | --- | --- | --- |
+| `forbidden_dependency` | A rejected library or service | Added lines in manifest files only: `requirements.txt`, `pyproject.toml`, `package.json`, `go.mod` | `redis==5.0` added while "Redis: rejected" is active | Yes |
+| `forbidden_import` | A rejected library | Added lines in `.py`, `.js`, `.ts` matching import patterns | `import redis`, `from 'redis'` | Yes |
+| `protected_path` | A constraint ("don't touch migrations by hand") | Changed file paths against globs | `migrations/0012_*.py` edited | Yes |
+| `forbidden_text` | A constraint with no better shape | Regex on added code lines | A hard-coded paid API endpoint | Warn only |
+| `drift_watch` | Any decision anchored to a commit | Files in the decision's scope changed since that commit | "Cache design decided at `a1b2c3d`; 3 files changed since" | Warn only |
+
+### The rule schema
+
+```python
+class GuardRule(BaseModel):
+    id: str                                   # "rej-redis"
+    decision_id: str                          # ledger item it was compiled from
+    kind: Literal["forbidden_dependency", "forbidden_import",
+                  "protected_path", "forbidden_text", "drift_watch"]
+    targets: list[str]                        # ["redis", "redis-py", "aioredis"]
+    paths: list[str] = ["**"]                 # globs the rule applies to
+    reason: str                               # "free tier; use in-process TTL cache"
+    severity: Literal["block", "warn"] = "warn"
+    source: str                               # "user:rahul" | "model:claude" | "import:chatgpt"
+    anchored_commit: str | None = None
+    status: Literal["proposed", "active", "overridden", "retired"] = "proposed"
+```
+
+### The rule compiler: proposed, then confirmed
+
+1. When a rejection or constraint lands in the ledger, the extractor model proposes a `GuardRule` as structured JSON, including aliases (`redis`, `redis-py`, `aioredis`).
+2. The rule appears on the Bridge page as **proposed**. One click by a person makes it **active**.
+3. Only active rules with `severity="block"` can fail a check. Proposed rules only warn.
+
+This is also the defence against memory poisoning: a fake decision planted by a web page can at most produce a warning, never a blocked merge.
+
+### The checker
+
+1. Get the diff: `git diff --unified=0 origin/<base>...HEAD`, parsed into added lines per file. Removed lines are ignored, because removing Redis is fine.
+2. For each active rule whose path globs match, run that kind's checker. Dependency names are normalised (lowercase, `-` and `_` treated alike) before comparison.
+3. Each hit becomes a `Violation(rule_id, file, line, evidence)`.
+4. Report as GitHub annotations on the exact lines (`::error file=requirements.txt,line=14::...`) plus one PR comment, updated in place rather than posted again on every push.
+5. Exit 1 only if a blocking violation isn't overridden. If the checker itself crashes, report the check as errored, never as passed.
+
+### Override and learning loop (where Hindsight earns its place)
+
+1. **Override:** the author adds the label `baton-override`, or comments `/baton override rej-redis reason: moving to paid tier`. The check re-runs and passes, and the override is logged with its reason.
+2. **Retain:** every trigger, fix and override is retained as a `guard_outcome` item, e.g. `[GUARD] rej-redis triggered on PR #12; author overrode: moving to paid tier`.
+3. **Reversal:** an override with a reason is itself a decision. It becomes a reversal event in the ledger, so the next model that pulls the baton knows Redis is now allowed.
+4. **Learn:** when a rule is overridden twice, the Bridge page suggests retiring it. Hindsight's observations capture the shift ("the team no longer holds the Redis rejection"), and the PR comment can link a `reflect` answer to "why was this rule created?"
+
+### Where the Action gets its rules
+
+| Option | Pros | Cons |
+| --- | --- | --- |
+| **Committed `.baton/rules.json` (recommended)** | Works with no Baton server running; rule changes are themselves reviewed in PRs | Stale until someone exports again |
+| Live API `GET /guard/rules` | Always current | CI depends on your server and tunnel being up; needs a repo secret |
+
+Fallback chain: live API if `BATON_URL` is set, else the committed file, else a **neutral** check saying "no rules found". It never passes silently.
+
+### Files and endpoints
+
+```text
+baton/guard/
+  rules.py       GuardRule schema, compiler (propose), confirm/retire
+  diff.py        git diff -> added lines per file
+  checkers.py    one function per rule kind
+  report.py      annotations + single updatable PR comment
+  cli.py         python -m baton.guard check --base origin/main
+.baton/rules.json
+.github/workflows/baton-guard.yml
+tests/test_guard.py
+```
+
+New endpoints: `GET /guard/rules?project=`, `POST /guard/rules/{id}/confirm`, `POST /guard/outcome`. New Bridge page panel: proposed rules with a Confirm button, and a lane for PR events on the timeline.
+
+### The workflow
+
+```yaml
+name: Baton Guard
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e .
+      - run: python -m baton.guard check --base origin/${{ github.base_ref }} --rules .baton/rules.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BATON_URL: ${{ secrets.BATON_URL }}
+          BATON_TOKEN: ${{ secrets.BATON_TOKEN }}
+```
+
+The `/baton override` comment needs a second trigger on `issue_comment`; for the MVP, the label is enough. Never switch to `pull_request_target` with a checkout of the PR's code: that runs untrusted code with write access.
+
+### Demo act 6: one ledger, three lanes
+
+1. In the chat lane, Redis is rejected (already in the demo).
+2. On the Bridge page, the proposed rule `rej-redis` appears; one click confirms it.
+3. Open a PR adding `redis==5.0` to `requirements.txt`. The Baton Guard check goes red on that exact line, with the comment: "Redis rejected by Rahul via ChatGPT: free tier. Override with the `baton-override` label."
+4. Add the label with a reason. The check goes green, the ledger shows a reversal, and Claude's next `pull_baton` says Redis is now allowed.
+
+### Edge cases
+
+| Case | Handling |
+| --- | --- |
+| Package aliases (`redis`, `redis-py`, `aioredis`) | `targets` holds aliases; names normalised before matching |
+| Lock files (`poetry.lock`, `package-lock.json`) | Ignored: manifests only, to avoid noise |
+| Removing a forbidden dependency | Only added lines are checked |
+| README or comments mention Redis | Blocking kinds only look at manifests and imports |
+| PR from a fork | No secrets and a read-only token: fall back to the committed file, annotate instead of commenting |
+| Very large diff | Cap files checked; report "partial check" instead of passing |
+| Poisoned or wrong rule | Only person-confirmed rules can block |
+| Guard crashes | Check reported as errored, visible on the PR |
+
+### MVP versus full build
+
+| Scope | Includes | Effort |
+| --- | --- | --- |
+| **MVP (before the finale)** | `forbidden_dependency` + `forbidden_import`, committed rules file, label override, annotations, one comment, outcome retained to Hindsight, tests | \~4 h |
+| Full | Rule compiler with Bridge confirm UI, `/baton override` comments, live API, `protected_path`, `drift_watch`, retire-after-2-overrides suggestion | \~9 to 10 h more |
+
+**Order:** finish and submit v2 first. Build the MVP only after the video and posts are done, then add it to the finale demo as act 6.
+
 ## Sources
 
 - [Hindsight overview](https://hindsight.vectorize.io/) and [Python client](https://hindsight.vectorize.io/sdks/python)

@@ -22,6 +22,11 @@ Endpoints (all JSON; model ids go in bodies because they contain '/' and ':'):
   POST   /api/sessions/{sid}/ledger/reverse  ReverseRejection -> list[LedgerRow]
   GET    /api/sessions/{sid}/trace                     -> TraceView
   POST   /api/sessions/{sid}/memory/refresh            -> TraceView
+  GET    /api/projects/{project}/bridge                -> BridgeView
+  GET    /api/bridge/setup                             -> BridgeSetup
+  POST   /api/projects/{project}/import ImportExchange -> BridgeView
+  GET    /api/projects/{project}/learning              -> LearningView
+  POST   /api/sessions/{sid}/ledger/why AskWhy         -> WhyView
 
 Errors: 404 {"detail": ...} for an unknown session or item; 422 for invalid input.
 Model, memory and extraction failures never become HTTP errors: they arrive as `alerts`.
@@ -35,17 +40,21 @@ from typing import Literal
 from baton.interfaces.ai import BurstResult, ModelStatus
 from baton.interfaces.types import (
     Alert,
+    BridgeEvent,
     CheckId,
     Frozen,
     HandoffEvent,
     Preferences,
+    PatchStat,
     RecallTrace,
 )
 
 __all__ = [
     "Health", "StartSession", "UpdateSession", "SendMessage", "UseModel", "ReverseRejection",
     "SessionView", "ChipView", "ReplyView", "TurnView", "ContractLine", "ContractView",
-    "LedgerRow", "TraceView", "BurstView", "ModelStatus", "BurstResult",
+    "LedgerRow", "TraceView", "BurstView", "ModelStatus", "BurstResult", "AppStatus",
+    "BridgeView", "BridgeSetup", "ImportExchange", "LearningPoint", "LearningView",
+    "AskWhy", "WhyView",
 ]
 
 # ---------------------------------------------------------------- request bodies
@@ -73,6 +82,16 @@ class UseModel(Frozen):
 class ReverseRejection(Frozen):
     item_id: str
     reason: str | None = None
+
+
+class ImportExchange(Frozen):
+    app: Literal["chatgpt", "claude"] = "chatgpt"
+    user_message: str
+    assistant_reply: str
+
+
+class AskWhy(Frozen):
+    item_id: str
 
 
 # ---------------------------------------------------------------- views
@@ -173,3 +192,49 @@ class TraceView(Frozen):
 class BurstView(Frozen):
     result: BurstResult
     alerts: tuple[Alert, ...] = ()
+
+
+class AppStatus(Frozen):
+    app: Literal["chatgpt", "claude"]
+    connected: bool
+    last_seen: datetime | None
+    pulls: int
+    records: int
+    checks: int
+
+
+class BridgeView(Frozen):
+    project: str
+    apps: tuple[AppStatus, ...]
+    events: tuple[BridgeEvent, ...]
+    contract: ContractView
+    ledger: tuple[LedgerRow, ...]
+
+
+class BridgeSetup(Frozen):
+    claude_desktop_config: str
+    claude_url: str
+    chatgpt_url: str | None
+    public_claude_url: str | None
+
+
+class LearningPoint(Frozen):
+    model: str
+    session_id: str
+    at: datetime
+    checks: int
+    failures: int
+
+
+class LearningView(Frozen):
+    stats: tuple[PatchStat, ...]
+    points: tuple[LearningPoint, ...]
+    alerts: tuple[Alert, ...] = ()
+
+
+class WhyView(Frozen):
+    item_id: str
+    approach: str
+    answer: str | None
+    sources: tuple[str, ...] = ()
+    error: str | None = None
