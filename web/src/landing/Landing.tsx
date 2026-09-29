@@ -1,10 +1,11 @@
 import { lazy, Suspense, useMemo, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { motion, useReducedMotion, useScroll } from "motion/react";
-import { ArrowDown, ArrowRight, Ban, Check, Clock, X } from "lucide-react";
+import { ArrowDown, ArrowDownToLine, ArrowRight, Ban, Check, Clock, PenLine, ShieldCheck, ShieldX, X } from "lucide-react";
 import { Aurora, BatonMark, Wordmark } from "../components/brand";
 import { cx } from "../components/ui";
 import { CopyButton } from "../app/Chat";
+import { AppIcon } from "../bridge/AppIcon";
 import { LoopSection } from "./LoopSection";
 
 const HeroScene = lazy(() => import("./HeroScene"));
@@ -69,6 +70,12 @@ export function Landing() {
         <Chapter n="06" kicker="Portable" title={<>Take it <i>anywhere.</i></>} flip
           body="The contract is plain text, redacted before it leaves. Copy the baton and paste it into any chat, even one Baton doesn't control."
           visual={<ContractMock />} />
+        <Chapter n="07" kicker="The bridge" title={<>One baton, <i className="baton-text pr-1">every app.</i></>}
+          body="Plan in ChatGPT, continue in Claude. Both call Baton's tools: ChatGPT records that you rejected Redis, Claude pulls the baton, checks its draft against it, and records the next step. The Bridge page shows every pass live."
+          visual={<BridgeMock />}
+          cta={<Link to="/bridge" className="glass mt-7 inline-flex h-11 items-center gap-2 rounded-xl px-5 text-[14px] font-medium text-fg transition hover:bg-white/[0.08]">
+            Open the Bridge <ArrowRight size={15} />
+          </Link>} />
         <Cta />
       </main>
       <footer className="border-t border-white/[0.06] px-6 py-8 text-center font-mono text-[11px] text-faint">
@@ -88,6 +95,7 @@ function Nav() {
           <a href="#story" className="hover:text-fg">The story</a>
           <a href="#verified" className="hover:text-fg">Verification</a>
           <a href="#portable" className="hover:text-fg">Copy baton</a>
+          <Link to="/bridge" className="hover:text-fg">Bridge</Link>
         </div>
         <Link to="/app" className="baton-gradient ml-auto inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-[13px] font-semibold text-ink transition hover:brightness-110 sm:ml-0">
           Open app <ArrowRight size={14} />
@@ -171,9 +179,9 @@ function RelayTrack() {
 }
 
 function Chapter({
-  n, kicker, title, body, visual, flip,
-}: { n: string; kicker: string; title: ReactNode; body: string; visual: ReactNode; flip?: boolean }) {
-  const id = n === "01" ? "story" : n === "05" ? "verified" : n === "06" ? "portable" : undefined;
+  n, kicker, title, body, visual, flip, cta,
+}: { n: string; kicker: string; title: ReactNode; body: string; visual: ReactNode; flip?: boolean; cta?: ReactNode }) {
+  const id = n === "01" ? "story" : n === "05" ? "verified" : n === "06" ? "portable" : n === "07" ? "bridge" : undefined;
   return (
     <section id={id} className="mx-auto grid max-w-6xl md:min-h-[78vh] scroll-mt-24 items-center gap-10 px-6 py-20 md:grid-cols-2 md:gap-16">
       <motion.div {...rise} className={cx(flip && "md:order-2")}>
@@ -184,6 +192,7 @@ function Chapter({
         </div>
         <h2 className="font-display text-[clamp(2.4rem,5vw,4rem)] leading-[1] tracking-tight">{title}</h2>
         <p className="mt-5 max-w-md text-[16.5px] leading-relaxed text-muted">{body}</p>
+        {cta}
       </motion.div>
       <motion.div {...rise} transition={{ ...rise.transition, delay: 0.12 }} className={cx("flex flex-col gap-3", flip && "md:order-1")}>
         {visual}
@@ -418,6 +427,48 @@ function ContractMock() {
           );
         })}
       </pre>
+    </div>
+  );
+}
+
+function BridgeMock() {
+  const reduce = useReducedMotion();
+  const events = [
+    { app: "chatgpt", icon: <PenLine size={13} className="text-muted" />, text: "Rejected: Redis · Decision: in-process TTL cache" },
+    { app: "claude", icon: <ArrowDownToLine size={13} className="text-lane-b" />, text: "Pulled the baton (6 items)" },
+    { app: "claude", icon: <ShieldX size={13} className="text-fail" />, text: "Draft failed: rejected approach (Redis)", tag: "fail" },
+    { app: "claude", icon: <ShieldCheck size={13} className="text-pass" />, text: "Draft passed all checks", tag: "repaired" },
+  ] as const;
+  return (
+    <div className="glass flex flex-col gap-3 rounded-2xl p-4">
+      <div className="relative grid grid-cols-3 items-center gap-2 py-2 text-center font-mono text-[11px]">
+        <div className="absolute inset-x-[16.6%] top-[26px] h-[2px] rounded-full opacity-40"
+          style={{ background: "linear-gradient(90deg, var(--color-lane-a), var(--color-lane-b), var(--color-lane-c))" }} aria-hidden />
+        {(["chatgpt", "baton", "claude"] as const).map((a) => (
+          <div key={a} className="relative flex flex-col items-center gap-1.5">
+            <AppIcon app={a} size={36} />
+            <span className="text-muted">{a === "chatgpt" ? "ChatGPT" : a === "claude" ? "Claude" : "Baton"}</span>
+          </div>
+        ))}
+        <motion.div className="absolute top-[12px]" style={{ left: "calc(16.6% - 14px)" }} aria-hidden
+          whileInView={reduce ? undefined : { left: ["calc(16.6% - 14px)", "calc(50% - 14px)", "calc(50% - 14px)", "calc(83.3% - 14px)"] }}
+          viewport={{ once: true, amount: 0.8 }} transition={{ duration: 2.4, delay: 0.4, times: [0, 0.4, 0.6, 1], ease: "easeInOut" }}>
+          <div className="rounded-full bg-ink/80 p-1 shadow-[0_0_20px_rgb(167_139_250/0.8)]"><BatonMark size={18} /></div>
+        </motion.div>
+      </div>
+      <ol className="surface flex flex-col rounded-xl p-2">
+        {events.map((e, i) => (
+          <motion.li key={e.text} {...stagger(i + 1)} className="flex items-center gap-2.5 border-b border-white/[0.05] px-1.5 py-2 text-[13px] last:border-0">
+            <AppIcon app={e.app} size={22} />
+            {e.icon}
+            <span className="min-w-0 flex-1">{e.text}</span>
+            {"tag" in e && (
+              <span className={cx("rounded-md border px-1.5 py-px font-mono text-[10.5px] uppercase",
+                e.tag === "fail" ? "border-fail/30 text-fail" : "border-pass/30 text-pass")}>{e.tag}</span>
+            )}
+          </motion.li>
+        ))}
+      </ol>
     </div>
   );
 }

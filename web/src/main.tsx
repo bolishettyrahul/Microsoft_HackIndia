@@ -7,6 +7,7 @@ import "@fontsource-variable/inter";
 import "@fontsource-variable/jetbrains-mono";
 import "./styles/index.css";
 import { AppPage } from "./app/AppPage";
+import { BridgePage } from "./bridge/BridgePage";
 import { Landing } from "./landing/Landing";
 
 createRoot(document.getElementById("root")!).render(
@@ -15,6 +16,7 @@ createRoot(document.getElementById("root")!).render(
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/app" element={<AppPage />} />
+        <Route path="/bridge" element={<BridgePage />} />
         <Route path="*" element={<Landing />} />
       </Routes>
     </BrowserRouter>

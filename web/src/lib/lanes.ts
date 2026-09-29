@@ -20,3 +20,8 @@ export function secondsUntil(iso: string | null | undefined, nowMs = Date.now())
   if (!iso) return 0;
   return Math.max(0, Math.ceil((Date.parse(iso) - nowMs) / 1000));
 }
+
+/** Bridge lanes reuse the model lane colours: ChatGPT left, Baton in the middle, Claude right. */
+export function appLane(app: "chatgpt" | "claude" | "baton"): Lane {
+  return app === "chatgpt" ? LANES[0] : app === "baton" ? LANES[1] : LANES[2];
+}

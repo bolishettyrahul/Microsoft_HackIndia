@@ -2,6 +2,7 @@
 // The baton travels from one model, through Baton, to the next. Loaded lazily; no network assets.
 import { useMemo, useRef, type ReactNode, type RefObject } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { useInView } from "motion/react";
 import { Environment, Float, Lightformer, Line } from "@react-three/drei";
 import * as THREE from "three";
 
@@ -212,13 +213,17 @@ function Rig({ children }: { children: ReactNode }) {
 
 export default function HeroScene({ still = false }: { still?: boolean }) {
   const labels = useRef<(HTMLDivElement | null)[]>([]);
+  // Stop drawing while the hero is scrolled out of view; resume just before it comes back.
+  // Only when frames are drawn changes, not what is drawn: same dpr, antialiasing and materials.
+  const wrap = useRef<HTMLDivElement>(null);
+  const inView = useInView(wrap, { margin: "200px 0px" });
   return (
-    <div className="relative h-full w-full">
+    <div ref={wrap} className="relative h-full w-full">
     <Canvas
       camera={{ position: [0, 0.35, 9], fov: 35 }}
       dpr={[1, 2]}
       gl={{ alpha: true, antialias: true, powerPreference: "high-performance" }}
-      frameloop={still ? "demand" : "always"}
+      frameloop={still ? "demand" : inView ? "always" : "never"}
       aria-label="Claude hits a rate limit; Baton carries the task to ChatGPT"
       role="img"
     >

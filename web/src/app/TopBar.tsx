@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { ChevronRight, FileText, List, MoreHorizontal, RefreshCw, Repeat2, SquarePen, Zap } from "lucide-react";
+import { ChevronRight, FileText, List, MoreHorizontal, RefreshCw, Repeat2, SquarePen, Waypoints, Zap } from "lucide-react";
 import { Link } from "react-router-dom";
 import type { ModelStatus } from "../api/contract";
 import { BatonMark, Wordmark } from "../components/brand";
@@ -24,6 +24,10 @@ export function TopBar({ b, onTogglePanel }: { b: BatonState; onTogglePanel: () 
           </span>
           <Toggle checked={memoryOn} onChange={(v) => b.setMemory(v)} label="Memory" />
         </label>
+        <Link to={`/bridge?project=${encodeURIComponent(b.session?.project ?? "demo")}`} title="ChatGPT and Claude on the same baton"
+          className="flex items-center gap-1.5 rounded-xl border border-white/10 px-2.5 py-1.5 text-[13px] text-muted hover:text-fg">
+          <Waypoints size={15} /><span className="hidden sm:inline">Bridge</span>
+        </Link>
         <DemoMenu b={b} />
         <button onClick={onTogglePanel} className="rounded-lg p-2 text-muted hover:bg-white/[0.06] hover:text-fg lg:hidden" aria-label="Show the baton">
           <FileText size={17} />

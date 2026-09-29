@@ -3,6 +3,7 @@ import type {
   BurstView, ContractView, Health, LedgerRow, ModelStatus, ReverseRejection, SessionView,
   StartSession, TraceView, TurnView, UpdateSession,
 } from "./contract";
+import type { BridgeSetup, BridgeView, ImportExchange } from "./bridge";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -33,6 +34,9 @@ export interface BatonApi {
   reverse(sid: string, body: ReverseRejection): Promise<LedgerRow[]>;
   trace(sid: string): Promise<TraceView>;
   refreshMemory(sid: string): Promise<TraceView>;
+  bridge(project: string): Promise<BridgeView>;
+  bridgeSetup(): Promise<BridgeSetup>;
+  importExchange(project: string, body: ImportExchange): Promise<BridgeView>;
 }
 
 type Fetch = typeof fetch;
@@ -56,6 +60,7 @@ export function createHttpApi(base = "/api", fetchImpl: Fetch = (...a) => fetch(
     return (await res.json()) as T;
   }
   const s = (sid: string) => `/sessions/${encodeURIComponent(sid)}`;
+  const p = (project: string) => `/projects/${encodeURIComponent(project)}`;
 
   return {
     health: () => call("GET", "/health"),
@@ -75,5 +80,8 @@ export function createHttpApi(base = "/api", fetchImpl: Fetch = (...a) => fetch(
     reverse: (sid, body) => call("POST", `${s(sid)}/ledger/reverse`, body),
     trace: (sid) => call("GET", `${s(sid)}/trace`),
     refreshMemory: (sid) => call("POST", `${s(sid)}/memory/refresh`),
+    bridge: (project) => call("GET", `${p(project)}/bridge`),
+    bridgeSetup: () => call("GET", "/bridge/setup"),
+    importExchange: (project, body) => call("POST", `${p(project)}/import`, body),
   };
 }

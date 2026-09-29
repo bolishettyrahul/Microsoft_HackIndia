@@ -243,7 +243,16 @@ export function Chat({ b }: { b: BatonState }) {
       </AnimatePresence>
 
       <div className="flex-1 overflow-y-auto px-5 py-6">
-        {b.turns.length === 0 ? (
+        {b.turns.length === 0 && (b.session?.turns ?? 0) > 0 ? (
+          <div className="mx-auto flex h-full max-w-md flex-col items-center justify-center text-center">
+            <BatonMark size={44} />
+            <h2 className="mt-4 font-display text-4xl leading-tight">The chat didn't come back.</h2>
+            <p className="mt-2 text-[14px] text-muted">
+              This session has {b.session!.turns} turn{b.session!.turns === 1 ? "" : "s"}, but the backend restarted and couldn't restore the transcript.
+              The baton is intact in the side panel, so you can keep going from the next step.
+            </p>
+          </div>
+        ) : b.turns.length === 0 ? (
           <div className="mx-auto flex h-full max-w-md flex-col items-center justify-center text-center">
             <BatonMark size={44} />
             <h2 className="mt-4 font-display text-4xl leading-tight">Start the relay.</h2>
