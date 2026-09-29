@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { ArrowUp, ChevronDown, Copy, Check, RotateCcw, Wrench } from "lucide-react";
 import type { HandoffEvent, ModelStatus, ReplyView, TurnView } from "../api/contract";
-import { AlertBanner, Button, Chip, ModelBadge, Tag, cx } from "../components/ui";
+import { AlertBanner, Button, Chip, Tag, cx } from "../components/ui";
 import { BatonMark } from "../components/brand";
 import { laneFor } from "../lib/lanes";
 import type { BatonState } from "./useBaton";
@@ -65,34 +65,21 @@ function handoffCopy(h: HandoffEvent): string {
 }
 
 function HandoffBanner({ h, models }: { h: HandoffEvent; models: ModelStatus[] }) {
-  const from = laneFor(h.from_model, models);
   const to = laneFor(h.to_model, models);
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="glass relative overflow-hidden rounded-xl px-4 py-3"
-    >
-      <div className="flex items-center gap-3">
-        <div className="relative h-6 w-24 shrink-0" aria-hidden>
-          <span className="absolute left-0 top-1/2 h-[2px] w-full -translate-y-1/2"
-            style={{ background: `linear-gradient(90deg, ${from.color}, ${to.color})`, opacity: 0.5 }} />
-          <motion.span
-            className="absolute top-1/2 -translate-y-1/2"
-            initial={{ left: 0 }}
-            animate={{ left: "calc(100% - 22px)" }}
-            transition={{ duration: 1.1, ease: [0.65, 0, 0.35, 1] }}
-          >
-            <BatonMark size={22} />
-          </motion.span>
-        </div>
-        <div className="text-[13px]">
-          <span className="mr-2 font-mono text-[11px] uppercase tracking-widest" style={{ color: h.reason === "429" ? "var(--color-cool)" : from.color }}>
-            {h.reason === "429" ? "429 handoff" : `${h.reason} handoff`}
-          </span>
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-3 py-1" role="status">
+      <span className="h-px flex-1 bg-gradient-to-r from-transparent to-white/15" />
+      <span className="flex max-w-[80%] items-center gap-2 text-center text-[12.5px] text-muted">
+        <motion.span initial={{ rotate: -90, scale: 0.6 }} animate={{ rotate: 0, scale: 1 }} transition={{ duration: 0.6 }}>
+          <BatonMark size={15} />
+        </motion.span>
+        <span>
+          {h.reason === "429" && <span className="mr-1.5 font-mono text-[11px] text-cool">429</span>}
           {handoffCopy(h)}
-        </div>
-      </div>
+        </span>
+        <span className="size-1.5 shrink-0 rounded-full" style={{ background: to.color }} />
+      </span>
+      <span className="h-px flex-1 bg-gradient-to-l from-transparent to-white/15" />
     </motion.div>
   );
 }
@@ -101,11 +88,12 @@ function ReplyBody({ r, models, muted }: { r: ReplyView; models: ModelStatus[]; 
   const lane = laneFor(r.model_id, models);
   return (
     <div className={cx("flex flex-col gap-2", muted && "opacity-70")}>
-      <div className="flex flex-wrap items-center gap-2">
-        <ModelBadge label={r.model_label} lane={lane} />
+      <div className="flex flex-wrap items-center gap-2 text-[12.5px]">
+        <span className="size-1.5 rounded-full" style={{ background: lane.color }} />
+        <span className="font-medium text-fg/90">{r.model_label}</span>
         {r.attempt === "repair" && <Tag tone="pass"><Wrench size={10} /> repaired</Tag>}
         {r.attempt === "rerun" && <Tag><RotateCcw size={10} /> re-run</Tag>}
-        <Tag tone={r.memory_on ? "muted" : "cool"}>{r.memory_on ? "memory on" : "memory off"}</Tag>
+        {!r.memory_on && <Tag>memory off</Tag>}
       </div>
       <div className="text-[14.5px] leading-relaxed text-fg/95"><RichText text={r.text} /></div>
       {r.chips.length > 0 && (
@@ -157,7 +145,13 @@ function Turn({ t, b, pending }: { t: TurnView; b: BatonState; pending: boolean 
         </div>
       </div>
       {t.handoffs.map((h, i) => <HandoffBanner key={i} h={h} models={b.models} />)}
-      {t.alerts.map((a, i) => <AlertBanner key={i} alert={a} />)}
+      {t.alerts.map((a, i) =>
+        a.level === "info" ? (
+          <div key={i} className="text-center text-[12px] text-faint" role="status">{a.message}</div>
+        ) : (
+          <AlertBanner key={i} alert={a} />
+        ),
+      )}
       {pending && (
         <div className="surface flex w-fit items-center gap-3 rounded-2xl px-4 py-3 text-[13px] text-muted">
           <span className="flex gap-1">
@@ -173,7 +167,7 @@ function Turn({ t, b, pending }: { t: TurnView; b: BatonState; pending: boolean 
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           className="surface relative max-w-[92%] rounded-2xl rounded-bl-md px-4 py-3.5"
-          style={{ boxShadow: `inset 3px 0 0 ${lane.color}` }}
+          style={{ boxShadow: `inset 2px 0 0 ${lane.color}` }}
         >
           <ReplyBody r={t.reply} models={b.models} />
           <Earlier attempts={t.earlier_attempts} models={b.models} />
@@ -234,16 +228,15 @@ export function Chat({ b }: { b: BatonState }) {
     <section
       className={cx(
         "relative flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border transition-all duration-500",
-        memoryOn ? "border-white/[0.06] bg-ink/40" : "border-bench/50 bg-ink/60 grayscale-[0.35]",
+        memoryOn ? "border-white/[0.06] bg-ink-2/70" : "border-bench/60 bg-ink-2/70",
       )}
       aria-label="Chat"
     >
       <AnimatePresence>
         {!memoryOn && (
           <motion.div initial={{ height: 0 }} animate={{ height: "auto" }} exit={{ height: 0 }} className="overflow-hidden">
-            <div className="border-b border-bench/40 bg-bench/15 px-5 py-2 text-[13px] text-slate-300">
-              <span className="mr-2 font-mono text-[11px] uppercase tracking-widest text-slate-400">Memory OFF</span>
-              No contract is sent. After a handoff, the next model starts fresh, like opening a new chat in another app.
+            <div className="border-b border-bench/40 bg-bench/10 px-5 py-2 text-center text-[12.5px] text-slate-300">
+              <b className="font-medium">Memory is off.</b> The next model won't get the baton; it starts fresh, like a new chat in another app.
             </div>
           </motion.div>
         )}
@@ -277,7 +270,7 @@ export function Chat({ b }: { b: BatonState }) {
               Try: {nextSuggestion}
             </button>
           )}
-          <div className="glass flex items-end gap-2 rounded-2xl p-2 focus-within:border-lane-b/40">
+          <div className="flex items-end gap-2 rounded-2xl border border-white/10 bg-black/30 p-2 focus-within:border-white/25">
             <textarea
               value={text}
               onChange={(e) => setText(e.target.value)}

@@ -5,8 +5,8 @@ import { Link } from "react-router-dom";
 import { api, apiMode } from "../api";
 import { Aurora, Wordmark } from "../components/brand";
 import { AlertBanner, Button, Glass, Toggle } from "../components/ui";
+import { TopBar } from "./TopBar";
 import { Chat } from "./Chat";
-import { Sidebar } from "./Sidebar";
 import { Tabs } from "./Tabs";
 import { useBaton, type BatonState } from "./useBaton";
 
@@ -14,22 +14,35 @@ export function AppPage() {
   const b = useBaton();
   return (
     <div className="h-dvh overflow-hidden">
-      <Aurora intensity={0.7} />
+      <Aurora intensity={0.3} />
       {b.session ? <Workspace b={b} /> : <StartScreen b={b} />}
     </div>
   );
 }
 
 function Workspace({ b }: { b: BatonState }) {
+  const [panel, setPanel] = useState(false);
   return (
-    <div className="flex h-full flex-col gap-3 p-3 lg:grid lg:grid-cols-[280px_minmax(0,3fr)_minmax(0,2fr)]">
-      <div className="hidden min-h-0 lg:block"><Sidebar b={b} /></div>
-      <div className="flex min-h-0 flex-1 flex-col gap-3">
-        <Toasts b={b} />
-        <div className="lg:hidden"><MobileBar b={b} /></div>
-        <div className="min-h-0 flex-1"><Chat b={b} /></div>
+    <div className="mx-auto flex h-full max-w-[1480px] flex-col gap-3 p-3">
+      <TopBar b={b} onTogglePanel={() => setPanel(!panel)} />
+      <div className="flex min-h-0 flex-1 gap-3">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
+          <Toasts b={b} />
+          <div className="min-h-0 flex-1"><Chat b={b} /></div>
+        </div>
+        <div className="hidden w-[360px] shrink-0 lg:block"><Tabs b={b} /></div>
       </div>
-      <div className="hidden min-h-0 lg:block"><Tabs b={b} /></div>
+      <AnimatePresence>
+        {panel && (
+          <motion.div className="fixed inset-0 z-40 flex justify-end bg-black/50 lg:hidden" initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }} onClick={() => setPanel(false)}>
+            <motion.div className="h-full w-[min(380px,92vw)] p-2" initial={{ x: 40 }} animate={{ x: 0 }} exit={{ x: 40 }}
+              onClick={(e) => e.stopPropagation()}>
+              <Tabs b={b} />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -39,13 +52,13 @@ function Toasts({ b }: { b: BatonState }) {
     <AnimatePresence>
       {b.burst && (
         <motion.div key="burst" initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}>
-          <div className="flex items-center gap-3 rounded-xl border border-cool/30 bg-cool/[0.08] px-4 py-2.5 text-[13px] text-amber-100">
+          <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-ink-2/80 px-4 py-2 text-[13px] text-muted">
             <Zap size={15} className="shrink-0 text-cool" />
             <span>
               Burst on <span className="font-mono">{b.burst.result.model_id}</span>: {b.burst.result.requests} real requests,{" "}
               {b.burst.result.tokens_sent.toLocaleString()} tokens.{" "}
               {b.burst.result.got_429
-                ? <>Got a <b>429</b>. Cooling for {Math.round(b.burst.result.retry_after ?? 0)} s. The next message hands off.</>
+                ? <>Got a <b className="font-mono font-medium text-cool">429</b>, cooling for {Math.round(b.burst.result.retry_after ?? 0)} s. <span className="text-fg">Your next message hands off.</span></>
                 : "No 429 yet."}
             </span>
             <button onClick={b.dismissBurst} className="ml-auto text-cool/70 hover:text-cool" aria-label="Dismiss"><X size={14} /></button>
@@ -62,20 +75,6 @@ function Toasts({ b }: { b: BatonState }) {
         </motion.div>
       )}
     </AnimatePresence>
-  );
-}
-
-/** Small screens: the essentials of the sidebar in one row. */
-function MobileBar({ b }: { b: BatonState }) {
-  const active = b.models.find((m) => m.is_active);
-  return (
-    <Glass className="flex items-center gap-3 px-3 py-2">
-      <Link to="/"><Wordmark /></Link>
-      <span className="truncate font-mono text-[11px] text-muted">{active?.label}</span>
-      <span className="ml-auto text-[12px] text-muted">Memory</span>
-      <Toggle checked={b.session?.memory_on ?? true} onChange={(v) => b.setMemory(v)} label="Memory" />
-      <Button size="sm" onClick={() => b.switchModel()}>Switch</Button>
-    </Glass>
   );
 }
 
