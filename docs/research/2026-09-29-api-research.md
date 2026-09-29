@@ -1,6 +1,6 @@
 # Baton: API and research notes
 
-Checked on 2026-09-29 against the official docs and the published client packages (`hindsight-client` 0.10.1, `groq` 1.7.0), before writing the design spec. When a fact here changes something in `Baton — Project Report.md`, the spec's "Changes from the report" table records the change.
+Checked on 2026-09-29 against the official docs and the published client packages (`hindsight-client` 0.10.1, `groq` 1.7.0), before writing the design spec. When a fact here changes something in `docs/reports/project-report.md`, the spec's "Changes from the report" table records the change.
 
 Items marked **Verify** are not settled by the docs. Phase 0 of the implementation plan tests each one against the real service.
 

@@ -2,7 +2,7 @@
 
 - **Date:** 2026-09-29
 - **Status:** Draft for review
-- **Source:** `Baton — Project Report.md` (2026-09-28)
+- **Source:** `docs/reports/project-report.md` (2026-09-28)
 - **Research:** `docs/research/2026-09-29-api-research.md`
 
 ## 1. Summary
