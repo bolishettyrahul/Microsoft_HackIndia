@@ -1,6 +1,6 @@
 # Baton: progress so far
 
-Last updated 2026-09-29, 22:30 IST. Submission is due at about 00:15 IST on 2026-09-30.
+Last updated 2026-09-29, 23:22 IST. Submission is due at about 00:15 IST on 2026-09-30.
 
 ## Decisions
 
@@ -24,6 +24,14 @@ Last updated 2026-09-29, 22:30 IST. Submission is due at about 00:15 IST on 2026
    - Project files: `requirements.txt`, `.env.example`, `pyproject.toml` and `.gitignore`.
    - The root `CLAUDE.md` maps each branch to its sector, lists the files each sector owns, and sets the cut-down scope.
 3. **Worktrees & Branches:** `frontend` worktree exists at `.claude/worktrees/frontend` (fast-forwarded to `main`). Branches `worktree-ai`, `worktree-backend`, `worktree-frontend` (and convenience aliases `ai`, `backend`, `frontend`) have been created at `18f126f` and pushed to remote `origin`.
+4. **AI sector implemented and pushed:** commit `c9956d3` is on the remote `ai` branch.
+   - `baton/ai/provider.py` implements the OpenAI-compatible Groq and Gemini adapter, disables SDK retries, strips reasoning blocks, and maps provider failures to `RateLimited` or `ModelUnavailable`.
+   - `baton/ai/chain.py` implements sticky per-session model selection, session-only benching, global cooldowns and disables, status reporting, and the Groq-only rate-limit burst.
+   - `baton/ai/extractor.py` implements strict structured extraction, one validation retry, provider fallback, alias normalization, and visible extraction-failure alerts.
+   - `baton/ai/store.py` implements the thread-safe SQLite L1 store with one connection per thread, WAL mode, sessions, messages, final attempts, checks, items, handoffs, and recall traces.
+   - `baton/ai/hindsight.py` implements the dedicated Hindsight event-loop thread, bank setup and directives, fire-and-forget retain, parallel state/ledger recall, metadata-based item reconstruction, timeouts, and no-credit alerts.
+   - `baton/ai/build.py` exposes `build_ai(settings) -> AIServices` and creates visible disabled/L1-only states when keys are absent.
+5. **AI offline verification passed:** `13 passed` under `tests/ai`, `compileall` succeeds, `pip check` reports no broken dependencies, and `git diff --check` is clean. The tests cover provider request shaping and reasoning removal; chain order, cooldown expiry, benching and burst; extractor schema/retry/failure; SQLite round trips and cross-thread access; Hindsight retain/recall, 402 and timeout behavior; and offline service construction.
 
 ## Scope for the submission
 
@@ -40,18 +48,37 @@ Last updated 2026-09-29, 22:30 IST. Submission is due at about 00:15 IST on 2026
 
 **Out:** the patch statistics and learning chart, seeding, the team view, "Why?", Ollama, and the full conformance suites.
 
+## Tests remaining
+
+### AI live tests (blocked until the three `.env` keys contain values)
+
+- [ ] Groq smoke calls for `openai/gpt-oss-120b`, `openai/gpt-oss-20b`, and `qwen/qwen3.8-27b`.
+- [ ] Gemini smoke calls for `gemini-3.5-flash` and `gemini-3.5-flash-lite`, including strict structured output.
+- [ ] Verify real 429 parsing and `retry-after` behavior for Groq and Gemini.
+- [ ] Run the Groq burst once and confirm the model enters cooldown without exhausting the demo-day quota.
+- [ ] Create/ensure the Hindsight project bank, retain one typed turn, and recall it with tags and metadata intact.
+- [ ] Confirm the real Hindsight client works on the dedicated event-loop thread and that a failed/slow recall returns the visible L1-only alert.
+
+### Cross-sector integration tests
+
+- [ ] Merge AI, backend and frontend branches into `main`, resolving only integration issues.
+- [ ] Run the complete offline `pytest` suite after the merge.
+- [ ] Exercise `build_ai` through the real FastAPI backend: normal chat, manual handoff, 429 handoff, sticky target model, and no-model fallback.
+- [ ] Verify memory OFF starts fresh; memory ON injects the contract; re-running with memory flipped replaces the turn's final reply and extracted items.
+- [ ] Verify extraction -> SQLite -> Hindsight retain -> handoff recall -> contract injection end to end.
+- [ ] Verify rejected, continuity and no-bullets checks plus the single repair retry through the real model chain.
+- [ ] Verify missing/bad keys, Hindsight timeout/no credits, extraction failure, and provider auth/bad-request failures are visible in the API and UI.
+- [ ] Run the React production build and rehearse the full demo path with Copy baton, Ledger and Memory trace.
+
 ## Next
 
-1. Create the `ai` and `backend` worktrees (`worktree-ai` and `worktree-backend`, from `main`), and write the file fences in all three.
-2. Start the three agents:
-   - **AI:** Groq and Gemini provider, model chain and cooldowns, burst, extractor, SQLite store, Hindsight, and `build_ai`.
-   - **Backend:** engine (contract, verifier, redaction, prompt composition), turn loop, and the FastAPI app, built against a fake AI.
-   - **Frontend:** the React UI against a mock API, with a Vite proxy to `:8000`.
-3. Meanwhile, on `main`: the README, and drafts of the video script and posts.
-4. Around 23:30: merge the sectors into `main`, run the live integration with real keys, and fix what breaks.
-5. Around 23:55: push, record the demo, submit.
+1. Fill the existing root `.env` with `GROQ_API_KEY`, `GEMINI_API_KEY` and `HINDSIGHT_API_KEY`; the variables currently exist but their values are empty.
+2. Run the six AI live-test groups above, using only minimal smoke calls until the final burst rehearsal.
+3. Finish and push the backend and frontend sectors.
+4. Merge all three sectors into `main`, run the cross-sector tests, and fix integration failures.
+5. Finish the README and submission content, rehearse the demo, record it, and submit.
 
 ## Needed from you
 
 - Pause OneDrive syncing. Otherwise it fights `node_modules`, `.venv` and SQLite.
-- Create `R_D\.env` from `.env.example` with `GROQ_API_KEY`, `GEMINI_API_KEY` and `HINDSIGHT_API_KEY`. Never commit it.
+- Fill the existing root `.env` with `GROQ_API_KEY`, `GEMINI_API_KEY` and `HINDSIGHT_API_KEY`. Never commit it or paste the values into chat.
