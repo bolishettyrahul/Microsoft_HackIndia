@@ -25,7 +25,7 @@ export function RichText({ text }: { text: string }) {
   );
 }
 
-export function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
+export function CopyButton({ text, label = "Copy", onCopy }: { text: string; label?: string; onCopy?: () => void }) {
   const [done, setDone] = useState(false);
   return (
     <Button
@@ -35,6 +35,7 @@ export function CopyButton({ text, label = "Copy" }: { text: string; label?: str
         try {
           await navigator.clipboard.writeText(text);
           setDone(true);
+          onCopy?.();
           setTimeout(() => setDone(false), 1600);
         } catch {
           /* clipboard blocked */
@@ -184,7 +185,7 @@ function Turn({ t, b, pending }: { t: TurnView; b: BatonState; pending: boolean 
         <div className="surface rounded-2xl p-4">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-sm font-medium">Every model is cooling. Take the baton with you:</span>
-            <CopyButton text={t.fallback_contract} label="Copy baton" />
+            <CopyButton text={t.fallback_contract} label="Copy baton" onCopy={b.markCopied} />
           </div>
           <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[12px] text-muted">{t.fallback_contract}</pre>
         </div>
@@ -193,7 +194,7 @@ function Turn({ t, b, pending }: { t: TurnView; b: BatonState; pending: boolean 
   );
 }
 
-const SUGGESTIONS = [
+export const SUGGESTIONS = [
   "Plan caching for our FastAPI recall endpoint.",
   "No Redis, we're on a free tier. Use an in-process cache. And no bullet lists.",
   "Let's continue the caching plan. What's the next step?",
@@ -246,10 +247,10 @@ export function Chat({ b }: { b: BatonState }) {
         {b.turns.length === 0 && (b.session?.turns ?? 0) > 0 ? (
           <div className="mx-auto flex h-full max-w-md flex-col items-center justify-center text-center">
             <BatonMark size={44} />
-            <h2 className="mt-4 font-display text-4xl leading-tight">The chat didn't come back.</h2>
+            <h2 className="mt-4 font-display text-4xl leading-tight">Earlier messages aren't available.</h2>
             <p className="mt-2 text-[14px] text-muted">
-              This session has {b.session!.turns} turn{b.session!.turns === 1 ? "" : "s"}, but the backend restarted and couldn't restore the transcript.
-              The baton is intact in the side panel, so you can keep going from the next step.
+              Earlier messages aren't available after a backend restart. The baton still has everything:
+              {" "}{b.session!.turns} turn{b.session!.turns === 1 ? "" : "s"} of decisions are in the side panel, so keep going from the next step.
             </p>
           </div>
         ) : b.turns.length === 0 ? (

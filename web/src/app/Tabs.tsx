@@ -1,17 +1,19 @@
 import { useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Ban, ChevronDown, RefreshCw, Undo2 } from "lucide-react";
-import type { ContractLine, LedgerRow } from "../api/contract";
+import { Ban, ChevronDown, HelpCircle, Loader2, RefreshCw, Undo2 } from "lucide-react";
+import type { ContractLine, LedgerRow, Preferences } from "../api/contract";
 import { AlertBanner, Button, Tag, cx } from "../components/ui";
 import { laneFor } from "../lib/lanes";
 import { CopyButton } from "./Chat";
+import { LearningTab } from "./Learning";
 import type { BatonState } from "./useBaton";
 
-type TabId = "baton" | "ledger" | "trace";
+type TabId = "baton" | "ledger" | "trace" | "learning";
 const TABS: { id: TabId; label: string }[] = [
   { id: "baton", label: "Baton" },
   { id: "ledger", label: "Ledger" },
   { id: "trace", label: "Memory" },
+  { id: "learning", label: "Learning" },
 ];
 
 /** The right panel: what the next model will receive, the rejection ledger, and the memory trace. */
@@ -40,6 +42,7 @@ export function Tabs({ b }: { b: BatonState }) {
         {tab === "baton" && <BatonTab b={b} />}
         {tab === "ledger" && <LedgerTab b={b} />}
         {tab === "trace" && <TraceTab b={b} />}
+        {tab === "learning" && <LearningTab b={b} />}
       </div>
     </section>
   );
@@ -49,7 +52,7 @@ function meta(l: ContractLine) {
   return `turn ${l.turn}${l.model ? ` · ${l.model}` : ""} · ${l.user} · ${l.tier === "l2" ? "recalled from long-term memory" : "this session"}`;
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
       <div className="mb-1 text-[11.5px] font-medium text-faint">{label}</div>
@@ -58,7 +61,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function Fold({ title, count, children, defaultOpen = false }: { title: string; count?: number; children: ReactNode; defaultOpen?: boolean }) {
+export function Fold({ title, count, children, defaultOpen = false }: { title: string; count?: number; children: ReactNode; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="border-t border-white/[0.06] pt-3">
@@ -92,6 +95,17 @@ function Lines({ lines }: { lines: ContractLine[] }) {
   );
 }
 
+/** The checked preferences, as short tags. */
+export function prefTags(p: Preferences): string[] {
+  return [
+    ...(p.no_bullets ? ["no bullet lists"] : []),
+    ...(p.max_words ? [`max ${p.max_words} words`] : []),
+    ...(p.no_emojis ? ["no emojis"] : []),
+    ...(p.no_preamble ? ["no preamble"] : []),
+    ...(p.code_languages ? [`code: ${p.code_languages.join(", ")}`] : []),
+  ];
+}
+
 function BatonTab({ b }: { b: BatonState }) {
   const c = b.contract;
   if (!c) return <Empty title="No baton yet" body="Start a session to begin." />;
@@ -101,7 +115,7 @@ function BatonTab({ b }: { b: BatonState }) {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <div className="text-[13px] text-muted">What the next model gets</div>
-        <CopyButton text={c.rendered} label="Copy baton" />
+        <CopyButton text={c.rendered} label="Copy baton" onCopy={b.markCopied} />
       </div>
       {c.alerts.filter((a) => a.level !== "info").map((a, i) => <AlertBanner key={i} alert={a} />)}
       {empty ? (
@@ -142,10 +156,10 @@ function BatonTab({ b }: { b: BatonState }) {
               </div>
             </Fold>
           )}
-          {(c.preferences.no_bullets || c.preferences.free_text.length > 0) && (
+          {prefTags(c.preferences).length + c.preferences.free_text.length > 0 && (
             <Field label="Preferences">
               <div className="flex flex-wrap gap-1.5">
-                {c.preferences.no_bullets && <Tag>no bullet lists</Tag>}
+                {prefTags(c.preferences).map((t) => <Tag key={t}>{t}</Tag>)}
                 {c.preferences.free_text.map((p) => <Tag key={p}>{p}</Tag>)}
               </div>
             </Field>
@@ -191,6 +205,7 @@ function LedgerItem({ r, b }: { r: LedgerRow; b: BatonState }) {
         turn {r.turn}{r.model && ` · ${r.model}`} · {r.user}
       </div>
       {reversed && r.reversal_reason && <div className="mt-1.5 text-[12px] text-muted">Reversed: {r.reversal_reason}</div>}
+      <WhyAnswer b={b} itemId={r.item_id} />
       {!reversed && (
         reversing ? (
           <form className="mt-2.5 flex gap-2" onSubmit={(e) => { e.preventDefault(); void b.reverse(r.item_id, reason); setReversing(false); }}>
@@ -200,12 +215,49 @@ function LedgerItem({ r, b }: { r: LedgerRow; b: BatonState }) {
             <Button size="sm" variant="ghost" type="button" onClick={() => setReversing(false)}>Cancel</Button>
           </form>
         ) : (
-          <button onClick={() => setReversing(true)} className="mt-2 flex items-center gap-1.5 text-[12.5px] text-muted hover:text-fg">
-            <Undo2 size={13} /> Reverse this
-          </button>
+          <div className="mt-2 flex items-center gap-4">
+            <button onClick={() => setReversing(true)} className="flex items-center gap-1.5 text-[12.5px] text-muted hover:text-fg">
+              <Undo2 size={13} /> Reverse this
+            </button>
+            <WhyButton b={b} itemId={r.item_id} />
+          </div>
         )
       )}
     </motion.li>
+  );
+}
+
+function WhyButton({ b, itemId }: { b: BatonState; itemId: string }) {
+  const w = b.whys[itemId];
+  return (
+    <button onClick={() => b.askWhy(itemId)} disabled={w?.loading}
+      className="flex items-center gap-1.5 text-[12.5px] text-muted hover:text-fg disabled:opacity-50">
+      {w?.loading ? <Loader2 size={13} className="animate-spin" /> : <HelpCircle size={13} />}
+      {w && !w.loading ? "Ask again" : "Why?"}
+    </button>
+  );
+}
+
+/** Long-term memory's answer to "why did we reject this?", with its sources; or its error. */
+function WhyAnswer({ b, itemId }: { b: BatonState; itemId: string }) {
+  const w = b.whys[itemId];
+  if (!w) return null;
+  if (w.loading)
+    return <div className="mt-2.5 text-[12.5px] text-muted" role="status">Asking long-term memory… this can take up to 20 s.</div>;
+  const v = w.view;
+  if (v.error || !v.answer)
+    return <div className="mt-2.5 rounded-lg border border-fail/30 bg-fail/[0.07] px-2.5 py-1.5 text-[12.5px] text-red-200" role="alert">
+      Couldn't answer: {v.error ?? "no answer came back"}
+    </div>;
+  return (
+    <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} className="mt-2.5 rounded-lg bg-black/30 p-2.5">
+      <p className="text-[13px] leading-relaxed">{v.answer}</p>
+      {v.sources.length > 0 && (
+        <ul className="mt-2 flex flex-col gap-0.5 border-t border-white/[0.06] pt-2">
+          {v.sources.map((s) => <li key={s} className="font-mono text-[10.5px] text-faint">↳ {s}</li>)}
+        </ul>
+      )}
+    </motion.div>
   );
 }
 

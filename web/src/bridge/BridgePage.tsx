@@ -1,18 +1,19 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   ArrowDownToLine, ArrowRight, Ban, ClipboardPaste, PenLine, Settings2, ShieldCheck, ShieldX, X,
 } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { apiMode } from "../api";
+import type { AppStatus, BridgeApp, BridgeEvent } from "../api/contract";
 import {
-  APP_NAME, ago, appOfLine, eventKey, isConnected, repairedChecks, sortEvents,
-  type AppStatus, type BridgeAction, type BridgeApp, type BridgeEvent, type ExternalApp,
-} from "../api/bridge";
+  APP_NAME, ago, appOfLine, eventKey, isConnected, repairedChecks, sortEvents, type BridgeAction, type ExternalApp,
+} from "../lib/bridge";
 import type { ContractLine, LedgerRow } from "../api/contract";
 import { Aurora, BatonMark, Wordmark } from "../components/brand";
 import { AlertBanner, Button, Tag, cx } from "../components/ui";
 import { CopyButton } from "../app/Chat";
+import { Field, Fold } from "../app/Tabs";
 import { appLane } from "../lib/lanes";
 import { AppIcon } from "./AppIcon";
 import { ImportCard, SetupDrawer } from "./BridgePanels";
@@ -207,24 +208,17 @@ function ActionIcon({ e }: { e: BridgeEvent }) {
 
 // ---------------------------------------------------------------- the baton
 
-function By({ l }: { l: Pick<ContractLine, "user" | "model"> }) {
+/** Who recorded a line: the app, the person and the turn (the team view). The model is in the tooltip. */
+function By({ l }: { l: Pick<ContractLine, "user" | "model" | "turn"> }) {
   const app = appOfLine(l);
   const lane = appLane(app);
   const who = app === "baton" ? `Baton · ${l.user}` : APP_NAME[app];
+  const full = `Recorded by ${who}, turn ${l.turn}${l.model ? `, with ${l.model}` : ""}`;
   return (
-    <span className="ml-1.5 inline-flex items-center gap-1 rounded-full px-1.5 py-px align-middle font-mono text-[10px]"
-      style={{ background: lane.soft, color: lane.color }} title={l.model ? `${who} · ${l.model}` : who}>
-      {who}
+    <span className="ml-1.5 inline-flex items-center gap-1 whitespace-nowrap rounded-full px-1.5 py-px align-middle font-mono text-[10px]"
+      style={{ background: lane.soft, color: lane.color }} title={full} aria-label={full}>
+      {who}<span className="opacity-60">· t{l.turn}</span>
     </span>
-  );
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div>
-      <div className="mb-1 text-[11.5px] font-medium text-faint">{label}</div>
-      {children}
-    </div>
   );
 }
 
@@ -293,9 +287,15 @@ function BatonColumn({ br }: { br: BridgeState }) {
               </ul>
             </Field>
           )}
-          {c!.decisions.length > 0 && <Field label="Decisions"><Lines lines={c!.decisions} /></Field>}
-          {c!.constraints.length > 0 && <Field label="Constraints"><Lines lines={c!.constraints} /></Field>}
-          {c!.open_questions.length > 0 && <Field label="Open questions"><Lines lines={c!.open_questions} /></Field>}
+          {c!.decisions.length + c!.constraints.length + c!.open_questions.length > 0 && (
+            <Fold title="Decisions, constraints and questions" count={c!.decisions.length + c!.constraints.length + c!.open_questions.length} defaultOpen>
+              <div className="flex flex-col gap-4">
+                {c!.decisions.length > 0 && <Field label="Decisions"><Lines lines={c!.decisions} /></Field>}
+                {c!.constraints.length > 0 && <Field label="Constraints"><Lines lines={c!.constraints} /></Field>}
+                {c!.open_questions.length > 0 && <Field label="Open questions"><Lines lines={c!.open_questions} /></Field>}
+              </div>
+            </Fold>
+          )}
         </>
       )}
       {ledger.length > 0 && (

@@ -1,9 +1,8 @@
 // Typed client for the backend -> frontend contract (see contract.ts). One function per endpoint.
 import type {
-  BurstView, ContractView, Health, LedgerRow, ModelStatus, ReverseRejection, SessionView,
-  StartSession, TraceView, TurnView, UpdateSession,
+  BridgeSetup, BridgeView, BurstView, ContractView, Health, ImportExchange, LearningView, LedgerRow, ModelStatus,
+  ReverseRejection, SessionView, StartSession, TraceView, TurnView, UpdateSession, WhyView,
 } from "./contract";
-import type { BridgeSetup, BridgeView, ImportExchange } from "./bridge";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -37,6 +36,8 @@ export interface BatonApi {
   bridge(project: string): Promise<BridgeView>;
   bridgeSetup(): Promise<BridgeSetup>;
   importExchange(project: string, body: ImportExchange): Promise<BridgeView>;
+  learning(project: string): Promise<LearningView>;
+  why(sid: string, itemId: string): Promise<WhyView>;
 }
 
 type Fetch = typeof fetch;
@@ -83,5 +84,7 @@ export function createHttpApi(base = "/api", fetchImpl: Fetch = (...a) => fetch(
     bridge: (project) => call("GET", `${p(project)}/bridge`),
     bridgeSetup: () => call("GET", "/bridge/setup"),
     importExchange: (project, body) => call("POST", `${p(project)}/import`, body),
+    learning: (project) => call("GET", `${p(project)}/learning`),
+    why: (sid, item_id) => call("POST", `${s(sid)}/ledger/why`, { item_id }),
   };
 }

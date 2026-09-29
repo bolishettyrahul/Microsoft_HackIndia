@@ -3,13 +3,12 @@
 // the next model restarts and re-suggests Redis (red chips); a re-run with memory ON continues
 // (green chips); asking for "steps" triggers a bullet reply that is repaired.
 import type {
-  Alert, BurstView, ChipView, ContractLine, ContractView, HandoffEvent, LedgerRow, ModelStatus,
-  RecallTrace, ReplyView, SessionView, TraceView, TurnView,
+  Alert, AppStatus, BridgeEvent, BridgeSetup, BridgeView, BurstView, ChipView, ContractLine, ContractView, HandoffEvent,
+  LearningPoint, LearningView, LedgerRow, ModelStatus, PatchStat, RecallTrace, ReplyView, SessionView, TraceView, TurnView,
+  WhyView,
 } from "./contract";
-import {
-  APP_NAME, CONNECTED_MS, type AppStatus, type BridgeAction, type BridgeEvent, type BridgeSetup, type BridgeView,
-  type ExternalApp,
-} from "./bridge";
+import { APP_NAME, CONNECTED_MS, type BridgeAction, type ExternalApp } from "../lib/bridge";
+import { extraChips } from "../lib/checks";
 import { ApiError, type BatonApi } from "./http";
 
 interface Profile { model_id: string; label: string; provider: string; burstable: boolean }
@@ -36,6 +35,34 @@ interface MockSession {
   pending: HandoffEvent[]; // manual handoffs waiting for the next turn
   userTexts: string[];
 }
+
+// ---------------------------------------------------------------- learning history
+// Earlier sessions on other features (the seed script's job for real), so the chart has a past.
+// First-attempt violation rates fall as Baton learns which patch level works for each model.
+
+const DAY = 86_400_000;
+const HISTORY: Record<string, [number, number][]> = {
+  // [checks, failures] per earlier session, oldest first
+  "groq:openai/gpt-oss-120b": [[6, 3], [6, 2], [7, 1], [6, 1]],
+  "gemini:gemini-3.5-flash": [[6, 4], [6, 3], [7, 2], [6, 1]],
+  "groq:qwen/qwen3.8-27b": [[5, 3], [6, 3], [6, 2], [6, 2]],
+};
+
+function stat(model: string, check_id: PatchStat["check_id"], level: number, passes: number, trials: number): PatchStat {
+  return { model, check_id, level, passes, trials };
+}
+
+const STATS: PatchStat[] = [
+  stat("groq:openai/gpt-oss-120b", "rejected", 0, 7, 8),
+  stat("groq:openai/gpt-oss-120b", "no_bullets", 0, 2, 6), stat("groq:openai/gpt-oss-120b", "no_bullets", 1, 5, 6),
+  stat("groq:openai/gpt-oss-120b", "continuity", 0, 4, 4),
+  stat("gemini:gemini-3.5-flash", "rejected", 0, 1, 5), stat("gemini:gemini-3.5-flash", "rejected", 1, 4, 5),
+  stat("gemini:gemini-3.5-flash", "no_bullets", 0, 1, 4), stat("gemini:gemini-3.5-flash", "no_bullets", 1, 2, 4),
+  stat("gemini:gemini-3.5-flash", "no_bullets", 2, 2, 2),
+  stat("gemini:gemini-3.5-flash", "continuity", 0, 3, 3),
+  stat("groq:qwen/qwen3.8-27b", "rejected", 0, 3, 4), stat("groq:qwen/qwen3.8-27b", "no_bullets", 0, 1, 5),
+  stat("groq:qwen/qwen3.8-27b", "no_bullets", 1, 1, 4), stat("groq:qwen/qwen3.8-27b", "no_bullets", 2, 1, 1),
+];
 
 const L2_LINES: Line[] = [
   {
@@ -270,7 +297,7 @@ export function createMockApi(
     const noBullets = s.view.prefs.no_bullets;
     const make = (body: string, chips: ChipView[], a: ReplyView["attempt"] = attempt): ReplyView => ({
       message_id: ++messageIds, model_id: model.model_id, model_label: model.label, text: body, memory_on: memoryOn,
-      attempt: a, chips,
+      attempt: a, chips: [...chips, ...extraChips(body, s.view.prefs)],
     });
 
     if (s.turns.length === 0 || (/plan|cach/.test(t) && !/no redis/.test(t) && !rejected)) {
@@ -316,8 +343,8 @@ export function createMockApi(
     if (!memoryOn && firstForModel) {
       return {
         final: make(
-          "Happy to help! Could you share more about what you're building? For caching an API endpoint, " +
-            "Redis is a great option for this:\n- fast in-memory reads\n- built-in TTLs\n- works across workers",
+          "Sure, happy to help! Could you share more about what you're building? For caching an API endpoint, " +
+            "Redis is a great option for this 🚀\n- fast in-memory reads\n- built-in TTLs\n- works across workers",
           chipsFor(true, true),
         ),
         earlier: [],
@@ -625,6 +652,51 @@ export function createMockApi(
       const items = addItems(b, app, lines, rejection);
       logEvent(b, project, Date.now(), { app, action: "import", summary, items });
       return bridgeView(project);
+    },
+    async learning(project): Promise<LearningView> {
+      const start = Date.now() - 5 * DAY;
+      const points: LearningPoint[] = Object.entries(HISTORY).flatMap(([model, runs], m) =>
+        runs.map(([checks, failures], i) => ({
+          model, session_id: `seed-${m}-${i}`, at: new Date(start + i * DAY + m * 3_600_000).toISOString(), checks, failures,
+        })));
+      // This project's own sessions: first attempts with memory ON, per model.
+      for (const s of sessions.values()) {
+        if (s.view.project !== project) continue;
+        const per = new Map<string, LearningPoint>();
+        for (const t of s.turns)
+          for (const r of [...t.earlier_attempts, ...(t.reply ? [t.reply] : [])]) {
+            if (r.attempt !== "first" || !r.memory_on || r.chips.length === 0) continue;
+            const pt = per.get(r.model_id) ?? { model: r.model_id, session_id: s.view.session_id, at: s.view.created_at, checks: 0, failures: 0 };
+            pt.checks += r.chips.length;
+            pt.failures += r.chips.filter((c) => !c.passed).length;
+            per.set(r.model_id, pt);
+          }
+        points.push(...per.values());
+      }
+      return { stats: STATS, points, alerts: [] };
+    },
+    async why(sid, itemId): Promise<WhyView> {
+      const s = get(sid);
+      const row = s.ledger.find((r) => r.item_id === itemId);
+      if (!row) throw new ApiError(404, `unknown item ${itemId}`);
+      await sleep(latency * 2);
+      const constraints = s.lines.filter((l) => l.kind === "constraint");
+      return {
+        item_id: itemId,
+        approach: row.approach,
+        answer:
+          `${row.user} rejected ${row.approach} on turn ${row.turn}${row.model ? `, talking to ${row.model}` : ""}, because of the ` +
+          `${row.reason ?? "stated constraint"}. ` +
+          (constraints.length ? `That follows the constraint “${constraints[0].text}”, recorded in the same turn. ` : "") +
+          `The team chose an in-process TTL cache instead, which needs no extra service.` +
+          (row.status === "reversed" ? ` It was later reversed: ${row.reversal_reason}.` : ""),
+        sources: [
+          `Rejection · turn ${row.turn}${row.model ? ` · ${row.model}` : ""} · ${row.user}`,
+          ...constraints.slice(0, 1).map((c) => `Constraint · turn ${c.turn} · ${c.user}`),
+          "Decision · Use an in-process TTL cache",
+        ],
+        error: null,
+      };
     },
   };
   return api;

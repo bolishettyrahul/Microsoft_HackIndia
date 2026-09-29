@@ -21,7 +21,7 @@ export function secondsUntil(iso: string | null | undefined, nowMs = Date.now())
   return Math.max(0, Math.ceil((Date.parse(iso) - nowMs) / 1000));
 }
 
-/** Bridge lanes reuse the model lane colours: ChatGPT left, Baton in the middle, Claude right. */
+/** Bridge lanes reuse the lane colours and match the 3D hero: ChatGPT fuchsia, Baton violet, Claude cyan. */
 export function appLane(app: "chatgpt" | "claude" | "baton"): Lane {
-  return app === "chatgpt" ? LANES[0] : app === "baton" ? LANES[1] : LANES[2];
+  return app === "chatgpt" ? LANES[2] : app === "baton" ? LANES[1] : LANES[0];
 }

@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api";
 import type {
-  BurstView, ContractView, LedgerRow, ModelStatus, SessionView, TraceView, TurnView,
+  BurstView, ContractView, LearningView, LedgerRow, ModelStatus, Preferences, SessionView, TraceView, TurnView, WhyView,
 } from "../api/contract";
 
 const SID_KEY = "baton.sid";
 const POLL_MS = 2000;
 const POLL_WINDOW_MS = 10_000; // extraction runs in the background after each reply
+
+/** A "Why?" answer per ledger item: loading, or the backend's view (answer or error). */
+export type WhyState = { loading: true } | { loading: false; view: WhyView };
 
 export type Busy = null | "start" | "send" | "rerun" | "switch" | "refresh" | `burst:${string}` | `use:${string}`;
 
@@ -27,6 +30,9 @@ export function useBaton() {
   const [error, setError] = useState<string | null>(null);
   const [burst, setBurst] = useState<BurstView | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [learning, setLearning] = useState<LearningView | null>(null);
+  const [whys, setWhys] = useState<Record<string, WhyState>>({});
+  const [copied, setCopied] = useState(false);
   const pollUntil = useRef(0);
   const inFlight = useRef(false);
   const sid = session?.session_id ?? null;
@@ -40,6 +46,7 @@ export function useBaton() {
     setTrace(t);
     setModels(m);
     setSession(s);
+    api.learning(s.project).then(setLearning).catch(() => {}); // optional panel: never blocks the others
   }, []);
 
   const load = useCallback(async (id: string) => {
@@ -99,6 +106,8 @@ export function useBaton() {
       setSession(s);
       setTurns([]);
       setBurst(null);
+      setWhys({});
+      setCopied(false);
       await refreshSide(s.session_id);
     }), [run, refreshSide]);
 
@@ -140,10 +149,12 @@ export function useBaton() {
     setSession(await api.updateSession(sid, { memory_on: on }));
   }), [sid, run]);
 
-  const setNoBullets = useCallback((on: boolean) => sid && session && run(null, async () => {
-    setSession(await api.updateSession(sid, { prefs: { ...session.prefs, no_bullets: on } }));
+  /** Change some reply-check preferences; the rest are kept. */
+  const setPrefs = useCallback((patch: Partial<Preferences>) => sid && session && run(null, async () => {
+    setSession(await api.updateSession(sid, { prefs: { ...session.prefs, ...patch } }));
     setContract(await api.contract(sid));
   }), [sid, session, run]);
+  const setNoBullets = useCallback((on: boolean) => setPrefs({ no_bullets: on }), [setPrefs]);
 
   const switchModel = useCallback(() => sid && run("switch", async () => setModels(await api.switchModel(sid))), [sid, run]);
   const pickModel = useCallback((id: string) => sid && run(`use:${id}`, async () => setModels(await api.useModel(sid, id))), [sid, run]);
@@ -153,12 +164,27 @@ export function useBaton() {
   }), [sid, run]);
   const reverse = useCallback((itemId: string, reason?: string) => sid && run(null, async () => {
     setLedger(await api.reverse(sid, { item_id: itemId, reason: reason || null }));
+    setWhys({}); // the backend's cached answers are dropped when the ledger changes
     setContract(await api.contract(sid));
   }), [sid, run]);
   const refreshMemory = useCallback(() => sid && run("refresh", async () => {
     setTrace(await api.refreshMemory(sid));
     setContract(await api.contract(sid));
   }), [sid, run]);
+
+  /** Ask long-term memory why an approach was rejected. Up to ~20 s; never goes through `run`, so the UI stays usable. */
+  const askWhy = useCallback(async (itemId: string) => {
+    if (!sid) return;
+    setWhys((w) => ({ ...w, [itemId]: { loading: true } }));
+    let view: WhyView;
+    try {
+      view = await api.why(sid, itemId);
+    } catch (e) {
+      const row = ledger.find((r) => r.item_id === itemId);
+      view = { item_id: itemId, approach: row?.approach ?? "", answer: null, sources: [], error: message(e) };
+    }
+    setWhys((w) => ({ ...w, [itemId]: { loading: false, view } }));
+  }, [sid, ledger]);
 
   const newSession = useCallback(() => {
     try {
@@ -172,11 +198,15 @@ export function useBaton() {
     setLedger([]);
     setTrace(null);
     setBurst(null);
+    setLearning(null);
+    setWhys({});
+    setCopied(false);
   }, []);
 
   return {
-    session, turns, models, contract, ledger, trace, busy, error, burst, now,
-    start, send, rerun, setMemory, setNoBullets, switchModel, pickModel, exhaust, reverse, refreshMemory, newSession,
+    session, turns, models, contract, ledger, trace, busy, error, burst, now, learning, whys, copied,
+    start, send, rerun, setMemory, setNoBullets, setPrefs, switchModel, pickModel, exhaust, reverse, refreshMemory, newSession,
+    askWhy, markCopied: () => setCopied(true),
     dismissBurst: () => setBurst(null),
     dismissError: () => setError(null),
   };

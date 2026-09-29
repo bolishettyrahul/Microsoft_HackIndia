@@ -1,57 +1,8 @@
-// Contracts v2 (planv2 §0.4): the bridge between ChatGPT, Claude and Baton.
-// These mirror baton/interfaces/api.py v2 exactly. They live here until main lands them in contract.ts;
-// then this file should re-export from there.
-import type { ContractLine, ContractView, LedgerRow } from "./contract";
+// Pure view logic for the Bridge page (tested in __tests__/bridge.test.ts). Types come from the contract.
+import type { AppStatus, BridgeApp, BridgeEvent, ContractLine } from "../api/contract";
 
-export type BridgeApp = "chatgpt" | "claude" | "baton";
-export type ExternalApp = "chatgpt" | "claude";
-export type BridgeAction = "pull" | "record" | "check" | "import";
-
-export interface BridgeEvent {
-  at: string;
-  project: string;
-  app: BridgeApp;
-  action: BridgeAction;
-  summary: string;
-  items: number;
-  passed: boolean | null;
-}
-
-export interface AppStatus {
-  app: ExternalApp;
-  connected: boolean;
-  last_seen: string | null;
-  pulls: number;
-  records: number;
-  checks: number;
-}
-
-export interface BridgeView {
-  project: string;
-  apps: AppStatus[];
-  events: BridgeEvent[];
-  contract: ContractView;
-  ledger: LedgerRow[];
-}
-
-export interface BridgeSetup {
-  claude_desktop_config: string;
-  claude_url: string;
-  chatgpt_url: string | null;
-  public_claude_url: string | null;
-}
-
-export interface ImportExchange {
-  app?: ExternalApp;
-  user_message: string;
-  assistant_reply: string;
-}
-
-//  GET  /projects/{project}/bridge                   -> BridgeView
-//  GET  /bridge/setup                                -> BridgeSetup
-//  POST /projects/{project}/import  ImportExchange   -> BridgeView
-
-// ---------------------------------------------------------------- view logic (pure, tested)
+export type ExternalApp = AppStatus["app"];
+export type BridgeAction = BridgeEvent["action"];
 
 export const CONNECTED_MS = 10 * 60 * 1000;
 

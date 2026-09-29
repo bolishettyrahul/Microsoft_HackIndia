@@ -8,6 +8,7 @@ import { AlertBanner, Button, Glass, Toggle } from "../components/ui";
 import { TopBar } from "./TopBar";
 import { Chat } from "./Chat";
 import { Tabs } from "./Tabs";
+import { DemoRail } from "./DemoRail";
 import { useBaton, type BatonState } from "./useBaton";
 
 export function AppPage() {
@@ -20,11 +21,29 @@ export function AppPage() {
   );
 }
 
+const RAIL_KEY = "baton.rail.hidden";
+
 function Workspace({ b }: { b: BatonState }) {
   const [panel, setPanel] = useState(false);
+  const [rail, setRailState] = useState(() => {
+    try {
+      return sessionStorage.getItem(RAIL_KEY) !== "1";
+    } catch {
+      return true;
+    }
+  });
+  const setRail = (on: boolean) => {
+    setRailState(on);
+    try {
+      sessionStorage.setItem(RAIL_KEY, on ? "0" : "1");
+    } catch {
+      /* storage blocked */
+    }
+  };
   return (
     <div className="mx-auto flex h-full max-w-[1480px] flex-col gap-3 p-3">
-      <TopBar b={b} onTogglePanel={() => setPanel(!panel)} />
+      <TopBar b={b} onTogglePanel={() => setPanel(!panel)} onShowGuide={rail ? undefined : () => setRail(true)} />
+      {rail && <DemoRail b={b} onDismiss={() => setRail(false)} />}
       <div className="flex min-h-0 flex-1 gap-3">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
           <Toasts b={b} />

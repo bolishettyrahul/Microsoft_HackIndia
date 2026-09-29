@@ -1,5 +1,5 @@
 import { Feather, MessageCircle } from "lucide-react";
-import type { BridgeApp } from "../api/bridge";
+import type { BridgeApp } from "../api/contract";
 import { BatonMark } from "../components/brand";
 import { appLane } from "../lib/lanes";
 

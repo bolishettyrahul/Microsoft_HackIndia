@@ -2,7 +2,10 @@
 // Owned by main: change it only there, together with api.py.
 // Datetimes arrive as ISO 8601 strings (UTC).
 
-export type CheckId = "rejected" | "continuity" | "no_bullets";
+export type CheckId =
+  | "rejected" | "continuity" | "no_bullets" | "max_words"
+  | "no_emojis" | "no_preamble" | "code_language";
+export type BridgeApp = "chatgpt" | "claude" | "baton";
 export type AlertLevel = "info" | "amber" | "red";
 export type AlertCode =
   | "repair_skipped" | "extraction_failed" | "reversal_unmatched"
@@ -13,7 +16,32 @@ export type HandoffReason = "429" | "manual" | "auth" | "bad_request" | "error";
 
 export interface Alert { level: AlertLevel; code: AlertCode; message: string }
 
-export interface Preferences { no_bullets: boolean; free_text: string[] }
+export interface Preferences {
+  no_bullets: boolean;
+  max_words?: number | null;
+  no_emojis?: boolean;
+  no_preamble?: boolean;
+  code_languages?: string[] | null;
+  free_text: string[];
+}
+
+export interface PatchStat {
+  model: string;
+  check_id: CheckId;
+  level: number;
+  passes: number;
+  trials: number;
+}
+
+export interface BridgeEvent {
+  at: string;
+  project: string;
+  app: BridgeApp;
+  action: "pull" | "record" | "check" | "import";
+  summary: string;
+  items: number;
+  passed: boolean | null;
+}
 
 export interface HandoffEvent {
   from_model: string;
@@ -59,6 +87,12 @@ export interface UpdateSession { memory_on?: boolean | null; prefs?: Preferences
 export interface SendMessage { text: string }
 export interface UseModel { model_id: string }
 export interface ReverseRejection { item_id: string; reason?: string | null }
+export interface ImportExchange {
+  app?: "chatgpt" | "claude";
+  user_message: string;
+  assistant_reply: string;
+}
+export interface AskWhy { item_id: string }
 
 // ---------------------------------------------------------------- views
 
@@ -145,6 +179,52 @@ export interface TraceView {
 
 export interface BurstView { result: BurstResult; alerts: Alert[] }
 
+export interface AppStatus {
+  app: "chatgpt" | "claude";
+  connected: boolean;
+  last_seen: string | null;
+  pulls: number;
+  records: number;
+  checks: number;
+}
+
+export interface BridgeView {
+  project: string;
+  apps: AppStatus[];
+  events: BridgeEvent[];
+  contract: ContractView;
+  ledger: LedgerRow[];
+}
+
+export interface BridgeSetup {
+  claude_desktop_config: string;
+  claude_url: string;
+  chatgpt_url: string | null;
+  public_claude_url: string | null;
+}
+
+export interface LearningPoint {
+  model: string;
+  session_id: string;
+  at: string;
+  checks: number;
+  failures: number;
+}
+
+export interface LearningView {
+  stats: PatchStat[];
+  points: LearningPoint[];
+  alerts: Alert[];
+}
+
+export interface WhyView {
+  item_id: string;
+  approach: string;
+  answer: string | null;
+  sources: string[];
+  error: string | null;
+}
+
 // ---------------------------------------------------------------- endpoints (all under /api)
 //
 //  GET    /health                                    -> Health
@@ -164,6 +244,11 @@ export interface BurstView { result: BurstResult; alerts: Alert[] }
 //  POST   /sessions/{sid}/ledger/reverse  ReverseRejection -> LedgerRow[]
 //  GET    /sessions/{sid}/trace                      -> TraceView
 //  POST   /sessions/{sid}/memory/refresh             -> TraceView
+//  GET    /projects/{project}/bridge                 -> BridgeView
+//  GET    /bridge/setup                              -> BridgeSetup
+//  POST   /projects/{project}/import ImportExchange  -> BridgeView
+//  GET    /projects/{project}/learning               -> LearningView
+//  POST   /sessions/{sid}/ledger/why AskWhy          -> WhyView
 //
 // 404 for an unknown session or item; 422 for invalid input. Failures of models,
 // memory or extraction never become HTTP errors: they arrive in `alerts`.

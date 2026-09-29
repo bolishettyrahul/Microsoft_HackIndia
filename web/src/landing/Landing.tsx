@@ -443,7 +443,7 @@ function BridgeMock() {
     <div className="glass flex flex-col gap-3 rounded-2xl p-4">
       <div className="relative grid grid-cols-3 items-center gap-2 py-2 text-center font-mono text-[11px]">
         <div className="absolute inset-x-[16.6%] top-[26px] h-[2px] rounded-full opacity-40"
-          style={{ background: "linear-gradient(90deg, var(--color-lane-a), var(--color-lane-b), var(--color-lane-c))" }} aria-hidden />
+          style={{ background: "linear-gradient(90deg, var(--color-lane-c), var(--color-lane-b), var(--color-lane-a))" }} aria-hidden />
         {(["chatgpt", "baton", "claude"] as const).map((a) => (
           <div key={a} className="relative flex flex-col items-center gap-1.5">
             <AppIcon app={a} size={36} />

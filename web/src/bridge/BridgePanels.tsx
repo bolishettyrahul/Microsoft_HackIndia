@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { ClipboardPaste, Lock, X } from "lucide-react";
-import { APP_NAME, type BridgeEvent, type BridgeSetup, type ExternalApp } from "../api/bridge";
+import type { BridgeEvent, BridgeSetup } from "../api/contract";
+import { APP_NAME, type ExternalApp } from "../lib/bridge";
 import { Button, cx } from "../components/ui";
 import { CopyButton } from "../app/Chat";
 import { AppIcon } from "./AppIcon";
@@ -18,7 +19,7 @@ export function ImportCard({ br, onDone }: { br: BridgeState; onDone: (e: Bridge
   return (
     <section id="import" className="surface scroll-mt-4 rounded-2xl p-4" aria-label="Import an exchange">
       <div className="flex items-center gap-2.5">
-        <ClipboardPaste size={16} className="text-lane-a" />
+        <ClipboardPaste size={16} className="text-lane-c" />
         <div className="text-[15px] font-medium">Paste from {APP_NAME[app]}</div>
       </div>
       <p className="mt-1 text-[12.5px] text-muted">

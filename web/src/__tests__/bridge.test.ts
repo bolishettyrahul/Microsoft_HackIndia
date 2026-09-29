@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  CONNECTED_MS, ago, appOfLine, isConnected, relayMove, repairedChecks, sortEvents, type AppStatus, type BridgeEvent,
-} from "../api/bridge";
+import type { AppStatus, BridgeEvent } from "../api/contract";
+import { CONNECTED_MS, ago, appOfLine, isConnected, relayMove, repairedChecks, sortEvents } from "../lib/bridge";
 import { createHttpApi } from "../api/http";
 import { createMockApi } from "../api/mock";
 

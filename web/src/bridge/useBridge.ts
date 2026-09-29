@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api";
-import {
-  eventKey, relayMove, sortEvents, type BridgeApp, type BridgeEvent, type BridgeSetup, type BridgeView, type ImportExchange,
-} from "../api/bridge";
+import type { BridgeApp, BridgeEvent, BridgeSetup, BridgeView, ImportExchange } from "../api/contract";
+import { eventKey, relayMove, sortEvents } from "../lib/bridge";
 
 const POLL_MS = 2000;
 
