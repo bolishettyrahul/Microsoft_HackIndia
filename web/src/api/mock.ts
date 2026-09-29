@@ -39,7 +39,7 @@ const L2_LINES: Line[] = [
     turn: 4, model: "Gemini 3.5 Flash", user: "Teammate", tier: "l2",
   },
   {
-    item_id: "l2-free", kind: "constraint", text: "Must stay on free tiers", reason: null,
+    item_id: "l2-free", kind: "constraint", text: "Run as a single uvicorn worker", reason: null,
     turn: 2, model: "gpt-oss-120b", user: "Rahul", tier: "l2",
   },
 ];

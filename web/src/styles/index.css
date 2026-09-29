@@ -69,8 +69,8 @@
     color-scheme: dark;
     background: var(--color-ink);
   }
+  /* No body background: html paints the canvas, so the fixed -z-10 aurora shows through. */
   body {
-    background: var(--color-ink);
     color: var(--color-fg);
     font-family: var(--font-sans);
     font-size: 15px;

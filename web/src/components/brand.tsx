@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { cx } from "./ui";
 
 /** Three drifting blurred blobs in the lane colours: the light that the glass frosts. */
@@ -31,16 +32,17 @@ export function Aurora({ intensity = 1, className }: { intensity?: number; class
 
 /** The baton: a gradient bar tilted like it's mid-pass. */
 export function BatonMark({ size = 28, className }: { size?: number; className?: string }) {
+  const id = `baton-g-${useId().replace(/:/g, "")}`; // unique per instance: a hidden duplicate id blanks the others
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" className={className} aria-hidden>
       <defs>
-        <linearGradient id="baton-g" x1="0" y1="1" x2="1" y2="0">
+        <linearGradient id={id} x1="0" y1="1" x2="1" y2="0">
           <stop offset="0" stopColor="#38BDF8" />
           <stop offset=".5" stopColor="#A78BFA" />
           <stop offset="1" stopColor="#E879F9" />
         </linearGradient>
       </defs>
-      <rect x="3" y="12.5" width="26" height="7" rx="3.5" transform="rotate(-35 16 16)" fill="url(#baton-g)" />
+      <rect x="3" y="12.5" width="26" height="7" rx="3.5" transform="rotate(-35 16 16)" fill={`url(#${id})`} />
     </svg>
   );
 }
