@@ -12,11 +12,13 @@ from uuid import uuid4
 
 from baton.interfaces.ai import MessageRecord, SessionRecord
 from baton.interfaces.types import (
+    BridgeEvent,
     CheckId,
     CheckResult,
     HandoffEvent,
     Item,
     Preferences,
+    PatchStat,
     RecallTrace,
     new_id,
     utcnow,
@@ -94,6 +96,26 @@ CREATE TABLE IF NOT EXISTS recalls (
 );
 CREATE INDEX IF NOT EXISTS idx_recalls_session_turn
     ON recalls(session_id, turn, id);
+CREATE TABLE IF NOT EXISTS bridge_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project TEXT NOT NULL,
+    at TEXT NOT NULL,
+    app TEXT NOT NULL,
+    action TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    items INTEGER NOT NULL,
+    passed INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_bridge_events_project_at
+    ON bridge_events(project, at);
+CREATE TABLE IF NOT EXISTS patch_stats (
+    model TEXT NOT NULL,
+    check_id TEXT NOT NULL,
+    level INTEGER NOT NULL,
+    passes INTEGER NOT NULL DEFAULT 0,
+    trials INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (model, check_id, level)
+);
 """
 
 
@@ -393,6 +415,104 @@ class SQLiteStore:
             (session_id,),
         ).fetchall()
         return [self._item(row) for row in rows]
+
+    def project_items(self, project: str) -> list[Item]:
+        rows = self._connection().execute(
+            """SELECT * FROM contract_items
+               WHERE project=? ORDER BY created_at, id""",
+            (project,),
+        ).fetchall()
+        return [self._item(row) for row in rows]
+
+    def log_bridge_event(self, event: BridgeEvent) -> None:
+        self._connection().execute(
+            """INSERT INTO bridge_events
+               (project, at, app, action, summary, items, passed)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                event.project,
+                event.at.isoformat(),
+                event.app,
+                event.action,
+                event.summary,
+                event.items,
+                None if event.passed is None else int(event.passed),
+            ),
+        )
+
+    def bridge_events(self, project: str, limit: int = 50) -> list[BridgeEvent]:
+        if limit < 0:
+            raise ValueError("limit must be non-negative")
+        rows = self._connection().execute(
+            """SELECT * FROM bridge_events
+               WHERE project=? ORDER BY at DESC, id DESC LIMIT ?""",
+            (project, limit),
+        ).fetchall()
+        return [
+            BridgeEvent(
+                at=_dt(row["at"]),
+                project=row["project"],
+                app=row["app"],
+                action=row["action"],
+                summary=row["summary"],
+                items=row["items"],
+                passed=None if row["passed"] is None else bool(row["passed"]),
+            )
+            for row in rows
+        ]
+
+    def record_check(self, model: str, check_id: CheckId, level: int, passed: bool) -> None:
+        if level not in range(4):
+            raise ValueError("patch level must be between 0 and 3")
+        self._connection().execute(
+            """INSERT INTO patch_stats (model, check_id, level, passes, trials)
+               VALUES (?, ?, ?, ?, 1)
+               ON CONFLICT(model, check_id, level) DO UPDATE SET
+                   passes=passes + excluded.passes,
+                   trials=trials + 1""",
+            (model, check_id.value, level, int(passed)),
+        )
+
+    def patch_stats(self, model: str | None = None) -> list[PatchStat]:
+        connection = self._connection()
+        if model is None:
+            rows = connection.execute(
+                "SELECT * FROM patch_stats ORDER BY model, check_id, level"
+            ).fetchall()
+        else:
+            rows = connection.execute(
+                "SELECT * FROM patch_stats WHERE model=? ORDER BY check_id, level",
+                (model,),
+            ).fetchall()
+        return [
+            PatchStat(
+                model=row["model"],
+                check_id=CheckId(row["check_id"]),
+                level=row["level"],
+                passes=row["passes"],
+                trials=row["trials"],
+            )
+            for row in rows
+        ]
+
+    def first_attempt_rates(self, project: str) -> list[tuple[str, str, datetime, int, int]]:
+        rows = self._connection().execute(
+            """SELECT m.model, m.session_id, MIN(m.created_at) AS at,
+                      COUNT(*) AS checks,
+                      SUM(CASE WHEN v.status='fail' THEN 1 ELSE 0 END) AS failures
+               FROM verifications AS v
+               JOIN messages AS m ON m.id=v.message_id
+               JOIN sessions AS s ON s.id=m.session_id
+               WHERE s.project=? AND m.attempt='first' AND m.memory_on=1
+                     AND m.model IS NOT NULL AND v.status!='n/a'
+               GROUP BY m.model, m.session_id
+               ORDER BY at, m.model, m.session_id""",
+            (project,),
+        ).fetchall()
+        return [
+            (row["model"], row["session_id"], _dt(row["at"]), row["checks"], row["failures"])
+            for row in rows
+        ]
 
     def log_handoff(self, session_id: str, turn: int, event: HandoffEvent) -> None:
         self.get_session(session_id)
