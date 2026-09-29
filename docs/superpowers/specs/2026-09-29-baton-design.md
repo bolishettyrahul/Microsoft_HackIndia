@@ -72,66 +72,76 @@ Version 1 is a demo and portfolio piece. It runs locally as a Streamlit app on G
 
 ## 6. Architecture
 
-Five layers. Each layer calls only the layers below it. Pure modules (contract, redact, compose, verifier, patch selection) do no I/O, so they can be tested without fakes.
+Five layers. Each layer calls only the layers below it. The engine's modules are pure (no I/O), so they're tested without fakes. The code is organised by **sector** so that parallel branches never edit the same files. `2026-09-29-baton-sectors-and-contracts.md` defines the sectors, who owns which files, and the exact interfaces between them.
 
-| # | Layer | Modules | Touches network or disk? |
+| # | Layer | Package (sector) | Touches network or disk? |
 | --- | --- | --- | --- |
-| 1 | Interface | `app.py`, `baton/ui/*` | No; it calls the orchestrator |
-| 2 | Turn loop | `baton/orchestrator.py` | No |
-| 3 | Agent | `contract.py`, `compose.py`, `verifier.py`, `patches.py`, `extractor.py` | No; the extractor calls through the model layer |
-| 4 | Memory | `memory/working.py` (L1), `memory/longterm.py` (L2), `memory/build.py`, `redact.py` | No; it calls the data layer |
-| 5 | Data | `llm/*`, `store.py`, `memory/service.py` (the Hindsight event-loop thread) | Yes. Only this layer does. |
+| 1 | Interface | `app.py`, `baton/ui/` (S5) | No; it calls only `BatonAPI` |
+| 2 | Turn loop | `baton/orchestrator/` (S4): the turn loop, the `BatonAPI` facade, wiring | No |
+| 3 | Agent | `baton/engine/` (S1): contract merge and render, verifier, patches, compose, redaction. `baton/llm/extractor.py` (S2). | No; the extractor calls through the model layer |
+| 4 | Memory | `baton/memory/` (S3): the `Store` and `LongTermMemory` implementations | Only through the data layer |
+| 5 | Data | `baton/llm/` provider and chain (S2); `baton/memory/store.py` (SQLite) and `baton/memory/service.py` (the Hindsight event-loop thread) (S3) | Yes. Only this layer does. |
 
-Redaction lives in the memory layer, so nothing unscrubbed can reach Hindsight or the SQLite item tables.
+Every layer may import the shared types and protocols in `baton/interfaces/` (S0).
+
+**Redaction has one choke point.** The orchestrator runs every item and message through the engine's `redact` before handing it to the store or long-term memory. A contract test proves that a secret typed into chat never reaches either one.
 
 ### Repository layout
 
 ```text
 baton/
-  config.py            settings from .env; model profiles; limits
-  contract.py          ContractItem, HandoffContract, merge rules, render()
-  redact.py            redact(text) -> RedactResult
-  compose.py           compose(...) -> list[Message]
-  verifier.py          check registry; verify(reply, ctx) -> list[CheckResult]
-  patches.py           patch texts per check and level; choose_level(); escalate()
-  extractor.py         extract(turn, contract) -> ExtractResult; strict_schema()
-  orchestrator.py      run_turn(), rerun_last_turn(), switch_model(), burst()
-  store.py             SQLite schema and queries (WAL mode)
-  llm/
-    types.py           Message, Completion, RateLimited, ModelUnavailable
-    provider.py        OpenAICompatModel: one class for Groq, Gemini and Ollama
-    chain.py           ModelChain: active model, cooldowns, status
-  memory/
-    service.py         MemoryService: event-loop thread, submit(coro, timeout)
-    longterm.py        bank setup, retain_turn, recall_handoff, reflect_why
-    working.py         L1 reads and writes for a session
-    build.py           build_contract(session) -> (HandoffContract, RecallTrace)
-  ui/
+  config.py              settings from .env; limits                              S0
+  interfaces/            types, protocols, errors, views, fakes                   S0
+  engine/                                                                         S1
+    contract.py          combine(), ledger(), render(), resolve()
+    redact.py            redact(), redact_item()
+    verifier.py          verify()
+    patches.py           choose_levels(), escalate(), patch_set()
+    compose.py           compose(), strip_reasoning()
+  llm/                                                                            S2
+    profiles.py          the model profiles in §9.1
+    provider.py          OpenAICompatModel: one class for Groq, Gemini and Ollama
+    chain.py             ModelChain: active model, cooldowns, status, burst
+    extractor.py         Extractor; strict_schema()
+  memory/                                                                         S3
+    store.py             the SQLite Store (WAL mode)
+    service.py           MemoryService: event-loop thread, submit(coro, timeout)
+    longterm.py          LongTermMemory over Hindsight: bank setup, retain, snapshot, team, why
+  orchestrator/                                                                   S4
+    turn.py              run_turn(), rerun_last_turn()
+    facade.py            Baton, the BatonAPI implementation, and its view builders
+    wiring.py            build_baton(settings): the real graph, or FakeBaton
+  ui/                                                                             S5
     sidebar.py  chat.py  tab_baton.py  tab_ledger.py  tab_trace.py
     tab_learning.py  tab_team.py
-app.py                 Streamlit entry point
+app.py                   Streamlit entry point                                    S5
 scripts/
-  check_setup.py       checks keys, models, the bank, and the quota headers
-  measure_prefs.py     level-0 violation rates for each model and check
-  seed_demo.py         real past sessions for the learning chart
-  seed_sessions.json   scripted user turns for seeding
+  check_ownership.py     fails if a branch edits files outside its sector         S0
+  check_setup.py         checks keys, models, the bank, and the quota headers     S6
+  measure_prefs.py       level-0 violation rates for each model and check         S6
+  seed_demo.py           real past sessions for the learning chart                S6
+  seed_sessions.json     scripted user turns for seeding                          S6
 tests/
-  unit/                no network access
-  scenario/            the demo acts, run with fake models and fake memory
-  live/                opt-in (-m live), needs keys
-docs/                  research, specs, plans, demo-script.md
-README.md  ARCHITECTURE.md  .env.example  requirements.txt
+  contracts/             one suite per protocol, plus boundary checks             S0
+  engine/  llm/  memory/  orchestrator/  ui/                                       one per sector
+  scenario/              the demo acts, with fake models and fake memory          S4
+  live/                  opt-in (-m live), needs keys                             S2, S3
+docs/                    research, specs, plans, demo-script.md
+README.md  ARCHITECTURE.md  .env.example  requirements.txt  pyproject.toml
 ```
 
 ### Runtime objects
 
-Streamlit reruns the whole script on every interaction, so long-lived objects are created once with `st.cache_resource`:
-- `Store`, the SQLite connection factory
-- `MemoryService`, the Hindsight event-loop thread
-- `ModelRegistry`, which holds one client per model and the global cooldowns
-- a `ThreadPoolExecutor(max_workers=2)` for extraction
+Streamlit reruns the whole script on every interaction, so `app.py` creates one `BatonAPI` per process with `st.cache_resource`. The facade owns the long-lived objects:
+- the `Store`
+- the `MemoryService` thread
+- the `ModelChain`, with one client per model and the global cooldowns
+- a `ThreadPoolExecutor(max_workers=2)` for background jobs
 
-Cooldowns are global, because rate limits belong to the key, not the browser tab. Per-tab state lives in `st.session_state`: the session id, the `turn_in_flight` guard, the benched models, and the L2 snapshot.
+**Where state lives:**
+- **Global:** cooldowns, because rate limits belong to the API key, not the browser tab.
+- **Per session, in the facade:** benched models and each session's L2 snapshot.
+- **In the UI:** only the session id, the `turn_in_flight` guard, and its own display state, all in `st.session_state`.
 
 ## 7. The contract and its items
 
@@ -189,14 +199,14 @@ Preference: No bullet lists in answers.
 
 ## 8. The turn loop
 
-`orchestrator.run_turn(session, user_msg) -> TurnResult` owns the loop. A `TurnResult` contains the final reply, the model, the check results, the repair details (the first attempt and its checks), any handoff events, the memory flag, the recall trace, **warnings**, and an optional fallback contract.
+`run_turn` in `baton/orchestrator/turn.py` owns the loop, and `BatonAPI.send` returns its result as a `TurnView`. A `TurnView` holds the final reply and its model, the check chips, any earlier attempts (such as the first attempt of a repaired reply), handoff events, the memory flag, **alerts**, and an optional fallback contract.
 
-**Warnings rule:** every caught exception in the orchestrator, memory or model layers either re-raises or adds a typed `Warning(level, code, message)` to the result. The UI renders every warning. Tests assert on them.
+**Alerts rule:** every caught exception in the orchestrator, memory or model code either re-raises or adds a typed `Alert(level, code, message)` to the result. (The type isn't called `Warning`, so it doesn't shadow Python's built-in.) The UI renders every alert. Tests assert on them.
 
 ### 8.1 Steps (memory ON)
 
 1. **Guard.** Set `turn_in_flight`, and ignore a second submit while it's set.
-2. **Wait for the previous turn's extraction,** up to 10 s, so the contract includes the last turn. On a timeout, carry on with a `memory-updating` warning.
+2. **Wait for the previous turn's extraction,** up to 10 s, so the contract includes the last turn. On a timeout, carry on with a `memory_updating` alert.
 3. **Build the contract** from L1 (this session's items in SQLite) and the session's L2 snapshot (§12.4). The snapshot is refreshed at session start and at each handoff.
 4. **For each model** in `chain.candidates()`, starting with the active model:
    1. Choose a patch level for each applicable check (§10.3).
@@ -205,11 +215,11 @@ Preference: No bullet lists in answers.
       - On `RateLimited`, set a cooldown from `retry_after`, record a handoff (`429`), refresh the L2 snapshot, and try the next model.
       - On `ModelUnavailable`, do the same with its reason (§9.3).
    4. Verify the reply (§10.1).
-   5. **Repair.** If any applicable check failed, raise each failed check's level by one (capped at 3), recompose, and retry once with the same model. If the retry itself gets a 429, set the cooldown, keep the first reply, and add a `repair-skipped` warning; don't hand off in the middle of a repair.
+   5. **Repair.** If any applicable check failed, raise each failed check's level by one (capped at 3), recompose, and retry once with the same model. If the retry itself gets a 429, set the cooldown, keep the first reply, and add a `repair_skipped` alert; don't hand off in the middle of a repair.
    6. Record the pass or fail of each applicable check at the level used (§10.4).
    7. Save the replies and verifications, then submit the background job (§8.5).
    8. Return.
-5. **If no model is available,** return a `TurnResult` holding the redacted contract and the cooldown countdowns. The UI shows it as a copyable block.
+5. **If no model is available,** return a `TurnView` holding the redacted contract and the cooldown countdowns. The UI shows it as a copyable block.
 
 **Sticky handoff.** After a handoff, the new model stays active until it fails or the user picks another model in the sidebar. When Model A's cooldown ends, it shows as ready again, but Baton doesn't switch back on its own. That avoids ping-ponging between models.
 
@@ -279,7 +289,7 @@ One class, `OpenAICompatModel`, wraps the `openai` SDK with `max_retries=0` and 
 | --- | --- | --- |
 | 429 | `RateLimited(retry_after)` | Cooldown for `retry-after` seconds. If the header is missing, use the body's `RetryInfo.retryDelay` (Gemini); if that's missing too, 60 s. |
 | 401 or 403 | `ModelUnavailable("auth")` | Model disabled for the process; red status |
-| 400 | `ModelUnavailable("bad_request", detail)` | Skipped for this turn; the warning shows the provider's message |
+| 400 | `ModelUnavailable("bad_request", detail)` | Skipped for this turn; the alert shows the provider's message |
 | 5xx, timeout, connection error | `ModelUnavailable("error")` | 30 s cooldown |
 
 ### 9.4 Burst ("Exhaust rate limit")
@@ -345,9 +355,9 @@ The **Model learning chart** plots, for each model and session in time order, th
 - **Input:** the user message, the final reply and the current contract. The contract is included so the extractor can spot reversals and answered questions and avoid duplicates.
 - **Model:** `gpt-oss-20b` in strict JSON-schema mode, falling back to `gemini-3.5-flash-lite`.
 - **Output schema (`TurnItems`):** a list of items. Each item has `kind` (`goal`, `decision`, `constraint`, `rejection`, `reversal`, `preference`, `next_step`, `open_question` or `resolved`), `text`, `reason`, `aliases`, `check_id` and `params` (`max_words` or `languages`). Every field is required, and optional fields are nullable. `strict_schema(model)` turns the Pydantic model into this strict shape.
-- **Targets:** for `reversal` and `resolved`, the extractor names the target approach or question, and code matches it to an item id by normalised text or alias. An unmatched reversal adds a `reversal-unmatched` warning and doesn't change the ledger.
+- **Targets:** for `reversal` and `resolved`, the extractor names the target approach or question, and code matches it to an item id by normalised text or alias. An unmatched reversal adds a `reversal_unmatched` alert and doesn't change the ledger.
 - **Preferences:** a stated preference that maps to a check ("no bullet lists, please") gets that `check_id` and turns the check on for the session. One that doesn't map is kept as free text in the contract and isn't verified.
-- **Validation:** the output goes through `TurnItems.model_validate_json`, then the alias rules (§7.2). If validation fails, Baton retries once with the error appended. If that fails too, it stores the raw turn only and adds an `extraction-failed` warning, which shows as an amber chip.
+- **Validation:** the output goes through `TurnItems.model_validate_json`, then the alias rules (§7.2). If validation fails, Baton retries once with the error appended. If that fails too, it stores the raw turn only and adds an `extraction_failed` alert, which shows as an amber chip.
 - **Prompt:** the extractor only records what the *user* accepted, rejected or stated. A model's suggestion becomes a decision only once the user accepts it.
 
 ## 12. Memory
@@ -410,7 +420,7 @@ The results are saved to the `recalls` table for the Memory trace tab: queries, 
 
 ### 12.4 Merging L1 and L2
 
-`build_contract(session)`:
+The orchestrator builds the contract with the engine's `combine(l1, l2, session_id=..., project=..., prefs=...)`. `LongTermMemory.snapshot` has already done step 1.
 1. Turn L2 results into items using their metadata. Results without `item_id` metadata, such as observations, become notes for the UI, not contract items.
 2. Drop L2 items from the current session, because L1 is authoritative for the current session.
 3. Combine the L2 items with the L1 items, remove duplicates by `item_id` and then by normalised text, and apply supersession and the merge rules (§7.1). For the latest-wins fields, compare `created_at` across both tiers.
@@ -418,15 +428,15 @@ The results are saved to the `recalls` table for the Memory trace tab: queries, 
 
 **Fallbacks:**
 - If the L2 recall fails or times out, use L1 only, with an amber "long-term memory unavailable" banner.
-- If both are empty on a handoff, use an empty contract with a red warning.
-- An empty contract never appears without a warning.
+- If both are empty on a handoff, use an empty contract with a red alert.
+- An empty contract never appears without an alert.
 
 ### 12.5 Memory service
 
 `MemoryService` starts a daemon thread that runs an asyncio event loop and creates the Hindsight client on it.
 - `submit(coro, timeout)` wraps `asyncio.run_coroutine_threadsafe(...).result(timeout)`.
 - `fire(coro)` doesn't wait.
-- Every 60 s, and at startup, it re-retains turns that still have items with `retained = 0`, so a crash never loses a decision.
+- The **orchestrator**, not the memory service, re-retains any turn that still has items with `retained = 0`, every 60 s and at startup, so a crash never loses a decision. `LongTermMemory` therefore doesn't need the store.
 - A 402 (out of credits) switches the service to L1-only mode with a red banner.
 
 ### 12.6 Team view
@@ -520,7 +530,7 @@ A single Streamlit page: the chat on the left (60%), the tabs on the right (40%)
 - Handoffs appear inline as a banner, e.g. "gpt-oss-120b rate-limited (retry in 23 s). Baton passed to Gemini 3.5 Flash; 7 memories recalled."
 - When memory is OFF, the chat has a grey border and a banner saying the new model starts fresh.
 - The last turn has a "Re-run with memory ON/OFF" button.
-- Warnings appear as amber or red chips or banners.
+- Alerts appear as amber or red chips or banners.
 
 **Tabs:**
 
@@ -562,7 +572,7 @@ A single Streamlit page: the chat on the left (60%), the tabs on the right (40%)
 | Failure | Handling |
 | --- | --- |
 | 429 on any model | Cooldown, handoff and banner; with no model left, the copyable contract |
-| 429 during a repair | Keep the first reply with its red chips and add a `repair-skipped` warning |
+| 429 during a repair | Keep the first reply with its red chips and add a `repair_skipped` alert |
 | Gemini's daily quota used up | 429 with a long wait; the countdown shows it; the chain moves to Model C |
 | Qwen thinks too long | `reasoning_effort="none"`; the 1,024-token reply cap |
 | A reversal ("OK, Redis is fine now") | A `reversal` item supersedes the rejection; the ledger shows it as reversed; a scenario test covers it |
@@ -582,7 +592,8 @@ A single Streamlit page: the chat on the left (60%), the tabs on the right (40%)
 
 ## 18. Testing
 
-- **Unit** (`tests/unit`, no network access):
+- **Contract** (`tests/contracts`): one suite per protocol, run against both the fake and the real implementation, plus import-boundary checks. See the sectors document, §7.
+- **Unit** (`tests/<sector>/`, no network access):
   - `verifier`: pass and fail cases for every check, the negation window, and code blocks ignored.
   - `redact`: one positive and one negative example per pattern.
   - `contract`: merge rules, supersession, caps, rendering, alias validation.
@@ -591,23 +602,16 @@ A single Streamlit page: the chat on the left (60%), the tabs on the right (40%)
   - `strict_schema`: every property required, and `additionalProperties: false`.
   - `llm` error mapping: 429 header and body parsing, with `httpx.MockTransport`.
   - `chain`: candidate order, cooldowns, stickiness.
-- **Scenario** (`tests/scenario`): the orchestrator with a `FakeModel` (a scripted list of replies and exceptions), a `FakeLongTerm` (in memory, with tag filtering and metadata) and SQLite in memory. There's one test per demo act, plus: a reversal; a 429 during a repair; no model available; a Hindsight timeout producing a warning; a failed extraction producing a warning; and a re-run replacing the turn's items.
+- **Scenario** (`tests/scenario`): the orchestrator with a `FakeModel` (a scripted list of replies and exceptions), a `FakeLongTerm` (in memory, with tag filtering and metadata) and SQLite in memory. There's one test per demo act, plus: a reversal; a 429 during a repair; no model available; a Hindsight timeout producing an alert; a failed extraction producing an alert; and a re-run replacing the turn's items.
 - **Live** (`tests/live`, `pytest -m live`, needs keys): one call per model; a retain and recall round trip with verbatim mode and tag filtering; parsing a real Groq 429.
 
 ## 19. Build order
 
-The implementation plan breaks this into tasks. Each phase ends with passing tests.
+The work is split into seven sectors that are built in parallel, one worktree each. The sectors document gives the file ownership, the contracts, and the merge gates G0 to G7. The implementation plans break each sector into tasks.
 
-0. **Setup and spikes.** The repo, a virtual environment, `requirements.txt` and `check_setup.py`. Then the spikes in §21: the Hindsight client on its own loop thread; verbatim mode, tags and metadata; the Gemini compatibility endpoint's 429 and strict schema; Qwen with thinking off; how many requests the burst needs.
-1. **The pure core:** contract, redact, verifier, patches, compose.
-2. **The model layer:** provider, error mapping, chain, burst.
-3. **Storage, L1 and the orchestrator,** tested with fakes.
-4. **The extractor.**
-5. **The Hindsight memory service,** L2 retain and recall, and the merge.
-6. **The Streamlit UI.**
-7. **Demo tooling:** `measure_prefs`, `seed_demo`, `docs/demo-script.md`.
-8. **The Team tab and "Why?".**
-9. **README** (with Limitations), **ARCHITECTURE.md**, and a full demo rehearsal.
+The §21 spikes run at the start of the sector that depends on each one:
+- **Sector 2 (models):** the Gemini compatibility endpoint's 429 and strict schema; Qwen with thinking off; how many requests the burst needs.
+- **Sector 3 (memory):** the Hindsight client on its own loop thread; verbatim mode, tags and metadata; retain latency.
 
 ## 20. Limitations (these go in the README) and roadmap
 
