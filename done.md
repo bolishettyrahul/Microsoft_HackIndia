@@ -49,6 +49,20 @@ Last updated 2026-09-29, 23:25 IST. Submission is due at about 00:15 IST on 2026
    - **Dashboard App (`/app`):** Slim top-bar relay showing model chain pills (active model with baton, cooling models with countdowns, click to switch), Memory toggle, Controls dropdown (Exhaust rate limit burst, Switch model, Refresh memory, No-bullets check), chat view with lane tags and check chips, and a right-hand Baton inspector panel (Goal, Next step, Rejected items, and Copy baton).
    - **Tests:** Vitest test suite (`web/src/__tests__/api.test.ts`) passing for mock states, request shapes, and lane rendering.
 
+## Backend status and handoff
+
+The backend is complete against deterministic fake AI services, but it is not considered live-integrated until the combined AI/backend/frontend application is exercised with real services.
+
+Remaining backend and integration hardening:
+
+1. Run FastAPI with the real `AIServices` bundle and verify it through the React live mode.
+2. Rebuild `GET /api/sessions/{sid}/turns` from SQLite after process restart; completed `TurnView` objects are currently cached in process memory.
+3. Persist recall traces through `Store.save_recall()` so Memory Trace history survives requests and restarts.
+4. Add a durable retain outbox/retry path for failed Hindsight retains.
+5. Add scenario coverage for memory OFF, manual switching, no available model, LTM failure, extraction failure, unmatched reversal, and proof that only redacted values reach SQLite and Hindsight.
+
+Backend verification command: `python -m pytest -q tests/backend` (expected checkpoint result: `7 passed`).
+
 ## Scope for the submission
 
 **In:**
