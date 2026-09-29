@@ -1,7 +1,7 @@
 # Baton plan v2: the work split into AI, backend and frontend
 
-> One section per owner: AI (§1), backend (§2), frontend (§3), with shared context in §0 and the integration lead's schedule in §4.
-> Deadline: **09:00 IST, 30 Sep 2026.** Written at 00:30 IST.
+> One section per owner: AI (§1), backend (§2), frontend (§3). Shared context is in §0, and the integration lead's schedule is in §4.
+> Deadline: **09:00 IST, 30 Sep 2026.** Written at 00:30 IST; updated to **replace ChatGPT with Gemini CLI**, because we can't use ChatGPT.
 
 ---
 
@@ -37,9 +37,9 @@
 | 5 | On a re-run, `seen_model` counts the current turn's own replies, so the continuity chip disappears | Backend |
 | 6 | README links are `file:///C:/…` paths (broken on GitHub), and it names a `docs/specs/` folder that doesn't exist | Integration lead |
 
-### 0.2 The product we're finishing: Baton as the bridge between ChatGPT and Claude
+### 0.2 The product we're finishing: Baton as the bridge between Gemini and Claude
 
-**Not generic memory.** Baton carries a **checked, typed contract** between AI apps:
+**Not generic memory.** Baton carries a **checked, typed contract** between AI apps from different vendors:
 - the goal, decisions and constraints;
 - **rejected approaches, with reasons and aliases**;
 - the **next step**, open questions and preferences;
@@ -48,22 +48,38 @@
 Code, not an LLM, checks replies against it.
 
 **The story:**
-1. **Plan in ChatGPT.** "Add caching… no Redis, we're on a free tier." ChatGPT calls Baton's `record_items`, or you paste the exchange into Baton's Import box. Baton stores the typed items.
-2. **Switch to Claude,** because of a limit or because you prefer it. Say *"pick up the baton for demo"*. Claude calls `pull_baton`, gets the contract, and continues from the next step without suggesting Redis.
+1. **Plan in Gemini CLI,** Google's terminal assistant. "Add caching to the recall endpoint… no Redis, we're on a free tier." Gemini calls Baton's `record_items`, and Baton stores the typed items.
+2. **Switch to Claude Desktop,** because Gemini hits its daily quota or you want Claude for the next part. Say *"pick up the baton for demo"*. Claude calls `pull_baton`, gets the contract, and continues from the next step without suggesting Redis.
 3. **Claude calls `check_reply`** on its draft. Baton's checks (rejected approach, continuity, no-bullets) return pass or fail with evidence and the fix rule.
-4. **Claude records the new decisions** (`record_items`). The baton can go back to ChatGPT the same way.
-5. **Baton's Bridge page shows it all live:** the ChatGPT lane, the Claude lane, the shared baton in the middle, and a timeline of every pull, record, check and import.
+4. **Claude records the new decisions** (`record_items`). The baton can go back to Gemini CLI the same way, with `pull_baton` in Gemini.
+5. **Baton's Bridge page shows it all live:** the Gemini lane, the Claude lane, the shared baton in the middle, and a timeline of every pull, record, check and import.
 
-Baton's own chat (Groq and Gemini, with a 429 handoff) stays as the in-app demo of the same engine.
+Baton's own chat (Groq and Gemini API models, with a 429 handoff) stays as the in-app demo of the same engine.
 
-**Your setup:**
-- **Keys:** Groq, Gemini and Hindsight.
-- **Apps:** Claude Desktop, Claude Pro, ChatGPT Go.
-- **ChatGPT Go:** it isn't confirmed that Go offers Developer mode (custom MCP connectors), so check first. Settings → Apps & Connectors → Advanced → Developer mode.
-  - **If it's there:** ChatGPT connects over a tunnel.
-  - **If not:** ChatGPT uses the **Import box** plus **Copy baton**, and the Claude side stays fully automatic.
+**Both apps run on your laptop and reach Baton at `http://localhost:8000`.** There's no tunnel, no public URL, and no cloud connector setup.
 
-### 0.3 Rules for everyone
+### 0.3 Which app replaces ChatGPT, and why
+
+| App | Vendor / models | Calls Baton's tools (MCP)? | Cost for you | Reaches `localhost`? | Verdict |
+| --- | --- | --- | --- | --- | --- |
+| **Gemini CLI** (`@google/gemini-cli`) | Google, Gemini models | Yes: `mcpServers` in `%USERPROFILE%\.gemini\settings.json`, streamable HTTP via `httpUrl` | Free with a Google account login | Yes, it runs locally | **Pick.** Different vendor from Claude, free, local, and a real product people use |
+| **Claude Desktop** | Anthropic, Claude | Yes: `claude_desktop_config.json`, through the `mcp-remote` helper | Your Claude Pro | Yes | **The other side of the bridge** |
+| VS Code + GitHub Copilot Chat (agent mode) | GitHub/Microsoft, including GPT models | Yes: `.vscode/mcp.json`, `"type": "http"` | Copilot Free tier (limited requests) | Yes | **Backup.** Use it if you want a GPT model in the story; it plugs into the same `/mcp/{app}` endpoint |
+| Claude Code | Anthropic | Yes | Included with Claude Pro | Yes | Weak: the same vendor as Claude Desktop, so it isn't a real switch |
+| Cursor | Multiple models | Yes | Limited free tier | Yes | Possible, but a heavier install for no extra story |
+| LM Studio | Local open models | Yes | Free | Yes | Multi-GB model downloads; too slow to set up tonight |
+| ChatGPT (any plan) | OpenAI | Not usable for us | — | — | Only by hand, through Baton's Import box and Copy baton |
+
+**Quotas:**
+- Log in to Gemini CLI with **"Login with Google"**, not our `GEMINI_API_KEY`. That keeps Gemini CLI's quota separate from the Gemini quota Baton's own chat uses.
+- If Gemini CLI does hit its quota during the demo, that's a **real** reason to switch to Claude, and it strengthens the story.
+
+**Verify first (spike S1, 01:05–01:20, integration lead):**
+1. `npm install -g @google/gemini-cli`, then `gemini` and "Login with Google".
+2. `/mcp` shows the list of servers (empty for now).
+3. Once B4 lands, repeat with the Baton server configured.
+
+### 0.4 Rules for everyone
 
 - **Edit only your own files** (tables below). Contracts live on `main` and change only there. If one is wrong, tell the integration lead; don't patch it on your branch.
 - **Import other sectors only through `baton.interfaces`.** The one exception is `baton/backend/wiring.py`, which calls `baton.ai.build.build_ai`.
@@ -71,13 +87,13 @@ Baton's own chat (Groq and Gemini, with a 429 handoff) stays as the in-app demo 
 - **Commit small and often on your branch.** Merge order: AI → backend → frontend.
 - **Nothing public may contain the word "hackathon":** no repo file, video or post.
 
-### 0.4 Contracts v2: the integration lead lands these on `main` first (00:45–01:05)
+### 0.5 Contracts v2: the integration lead lands these on `main` first (00:45–01:05)
 
 Additive only. `CONTRACT_VERSION` becomes `"2h-2.0"`.
 
 ```python
 # baton/interfaces/types.py
-BridgeApp = Literal["chatgpt", "claude", "baton"]
+BridgeApp = Literal["gemini", "claude", "copilot", "other"]   # "other" = pasted via the Import box
 
 class BridgeEvent(Frozen):
     at: datetime
@@ -95,7 +111,8 @@ def bridge_events(self, project: str, limit: int = 50) -> list[BridgeEvent]: ...
 
 # baton/interfaces/api.py (mirrored in web/src/api/contract.ts)
 class AppStatus(Frozen):
-    app: Literal["chatgpt", "claude"]
+    app: BridgeApp
+    label: str                   # "Gemini CLI", "Claude Desktop", "GitHub Copilot"
     connected: bool              # seen in the last 10 minutes
     last_seen: datetime | None
     pulls: int
@@ -104,19 +121,19 @@ class AppStatus(Frozen):
 
 class BridgeView(Frozen):
     project: str
-    apps: tuple[AppStatus, ...]
+    apps: tuple[AppStatus, ...]  # always gemini and claude; copilot and other only once seen
     events: tuple[BridgeEvent, ...]
     contract: ContractView       # project-wide: every session and app
     ledger: tuple[LedgerRow, ...]
 
 class BridgeSetup(Frozen):
-    claude_desktop_config: str   # JSON snippet to paste into claude_desktop_config.json
-    claude_url: str              # e.g. http://localhost:8000/mcp/claude/<token>
-    chatgpt_url: str | None      # the public tunnel URL, if BATON_PUBLIC_URL is set
-    public_claude_url: str | None
+    claude_desktop_config: str   # JSON to paste into %APPDATA%\Claude\claude_desktop_config.json
+    gemini_cli_settings: str     # JSON to paste into %USERPROFILE%\.gemini\settings.json
+    copilot_mcp_json: str        # JSON for .vscode/mcp.json (backup)
+    urls: dict[str, str]         # app -> http://localhost:8000/mcp/<app>/<token>
 
 class ImportExchange(Frozen):
-    app: Literal["chatgpt", "claude"] = "chatgpt"
+    app: BridgeApp = "other"
     user_message: str
     assistant_reply: str
 
@@ -128,9 +145,7 @@ class ImportExchange(Frozen):
 
 **Also on `main`:**
 - **`requirements.txt`:** add `mcp`.
-- **`.env.example`:**
-  - `BATON_MCP_TOKEN`, a random string in the MCP URL so a tunnelled URL isn't guessable;
-  - `BATON_PUBLIC_URL`, the tunnel URL, when there is one.
+- **`.env.example`:** add `BATON_MCP_TOKEN`, a random string in the MCP URLs. There's no public URL setting any more, because everything is local.
 - **`CLAUDE.md`:** the new scope and the new file ownership.
 - **Worktrees:** recreate `ai` and `backend` from `main`, and fast-forward `frontend`.
 
@@ -211,20 +226,19 @@ class ImportExchange(Frozen):
 - **Test:** a `client_factory` that raises gives a working `AIServices` whose `snapshot()` returns that alert.
 
 **A3. Store support for the bridge (02:00–02:45)**
-- **`project_items(project)`:** all `contract_items` rows for that project, across sessions, oldest first. The bridge needs this, so a Claude pull sees what ChatGPT recorded a second earlier, even while Hindsight is still indexing.
+- **`project_items(project)`:** all `contract_items` rows for that project, across sessions, oldest first. The bridge needs this, so a Claude pull sees what Gemini CLI recorded a second earlier, even while Hindsight is still indexing.
 - **A new `bridge_events` table,** with columns `id`, `project`, `at`, `app`, `action`, `summary`, `items` and `passed`, plus an index on `(project, at)`.
 - **`log_bridge_event()`** and **`bridge_events(project, limit)`**, newest first.
 - **Tests:** round trips; `project_items` spans two sessions and ignores other projects; event ordering and limit.
 
-**A4. The `openai:` provider seam (02:45–03:00, small)**
-- Add `"openai": "https://api.openai.com/v1"` to `_BASE_URLS`, with an `OPENAI_API_KEY` setting.
-- With no key, the model shows "disabled: OPENAI_API_KEY is not configured", which matches how missing Groq and Gemini keys are handled.
-- No live test, since there's no key. Claude as an in-app model is **out of scope** without an Anthropic key; see §6.
+**A4. Quota guard for the demo (02:45–03:00)**
+- Baton's own chain uses `GEMINI_API_KEY`, and Gemini CLI uses the presenter's Google login. Confirm in the findings doc that the two quotas are separate.
+- Note how many Groq and Gemini requests one full rehearsal uses, so we don't run out before recording.
+- Keep a spare Groq key ready.
 
 **A5. Support integration (03:30 onwards)**
 - Be on call for live failures during merge and rehearsal.
 - Run `pytest -m live` again after the merge.
-- Keep a fresh Groq key ready for recording.
 
 ### 1.4 What you hand the backend
 
@@ -242,7 +256,7 @@ class ImportExchange(Frozen):
 
 ## 2. Backend owner
 
-**Your job:** the brain and the API. The turn loop, the contract engine and the checks, the HTTP API the UI calls, and now the **MCP bridge** that ChatGPT and Claude call.
+**Your job:** the brain and the API. The turn loop, the contract engine and the checks, the HTTP API the UI calls, and now the **MCP bridge** that Gemini CLI and Claude Desktop call.
 
 ### 2.1 Your files
 
@@ -332,7 +346,7 @@ class ImportExchange(Frozen):
 
 **B3. `bridge.py`: the bridge service (02:00–03:00)**
 - **`Bridge(ai, settings)`**, owned by `Baton` (as `baton.bridge`).
-- **External sessions:** one per (project, app), with `user="ChatGPT"` or `user="Claude"`. Create it on first use and cache the id, looking up existing sessions by project and user.
+- **External sessions:** one per (project, app), with a readable user label: `"Gemini CLI"`, `"Claude"`, `"Copilot"` or `"Imported"`. Create it on first use and cache the id, looking up existing sessions by project and user.
 - **`pull(project, app) -> str`:**
   - builds the contract with `combine(store.project_items(project), snapshot.items, session_id=<the app's session>, …)`, then `render` and `redact`;
   - adds a short header: "This is the Baton for <project>. Continue from Next step. Do not suggest anything listed as Rejected. Before answering, call check_reply with your draft.";
@@ -351,50 +365,59 @@ class ImportExchange(Frozen):
   - returns a pass, or each failed check with its evidence and the rule sentence from `compose._RULES`;
   - logs a `check` event with `passed`.
 - **`view(project) -> BridgeView`:**
-  - `AppStatus` per app, from its events (connected if seen in the last 10 minutes);
+  - `AppStatus` per app, from its events (connected if seen in the last 10 minutes); Gemini and Claude always show, and Copilot and "other" only once seen;
   - the latest 50 events;
   - the project-wide `ContractView` and `ledger`.
 
 **B4. `mcp_server.py`: the MCP tools (03:00–03:45)**
-- **Server:** the `mcp` Python SDK's `FastMCP`. `build_mcp(bridge, app)` returns a server for one app. Mount two of them in `app.py`, at `/mcp/claude/{BATON_MCP_TOKEN}` and `/mcp/chatgpt/{BATON_MCP_TOKEN}`, over streamable HTTP. The URL tells Baton which app is calling.
-- **Lifespan:** start both servers' `session_manager.run()` in the FastAPI lifespan.
+- **Server:** the `mcp` Python SDK's `FastMCP`. `build_mcp(bridge, app)` returns a server for one app. Mount one per app in `app.py`, at `/mcp/gemini/{BATON_MCP_TOKEN}`, `/mcp/claude/{BATON_MCP_TOKEN}` and `/mcp/copilot/{BATON_MCP_TOKEN}`, over streamable HTTP. The URL tells Baton which app is calling.
+- **Lifespan:** start each server's `session_manager.run()` in the FastAPI lifespan.
 - **Spike first:** 15 minutes on mounting FastMCP inside FastAPI, with a minimal server and an MCP SDK client round trip.
-- **Tools.** Their descriptions are what ChatGPT and Claude read, so write them carefully:
+- **Tools.** Their descriptions are what Gemini and Claude read, so write them carefully:
 
   | Tool | Description the model sees |
   | --- | --- |
-  | `pull_baton(project)` | "Get the Baton for a project: the goal, the next step, decisions, constraints, rejected approaches with reasons, and preferences, recorded across ChatGPT, Claude and Baton. Call this when the user says to pick up, continue or resume a project, or mentions Baton." |
+  | `pull_baton(project)` | "Get the Baton for a project: the goal, the next step, decisions, constraints, rejected approaches with reasons, and preferences, recorded across Gemini, Claude and Baton. Call this when the user says to pick up, continue or resume a project, or mentions Baton." |
   | `record_items(project, items)` | "Record what the USER decided in this conversation. Call it after the user accepts, rejects or reverses an approach, sets a goal, states a constraint or preference, or when the next step changes. Only record what the user stated or accepted, never your own suggestions. Kinds: goal, decision, constraint, rejection (with reason and aliases), reversal (target = the rejected approach), preference, next_step, open_question, resolved." |
   | `record_exchange(project, user_message, assistant_reply)` | "Alternative to record_items: send the latest exchange, and Baton extracts the items itself." |
   | `check_reply(project, draft)` | "Before sending an answer on a Baton project, check your draft. It returns the failures with evidence and the rule to follow. If anything fails, rewrite and check again." |
   | `get_ledger(project)` | "List rejected approaches with reasons, aliases, who rejected them, and whether they were reversed." |
 
-- **Tests:** call each tool function directly, plus one round trip through the MCP SDK's in-memory client. That round trip is the proof that ChatGPT and Claude will see the same tool list.
+- **Tests:** call each tool function directly, plus one round trip through the MCP SDK's in-memory client. That round trip is the proof that Gemini CLI and Claude will see the same tool list.
 
 **B5. The bridge HTTP endpoints (03:45–04:00)**
-- `GET /api/projects/{project}/bridge`, `GET /api/bridge/setup` and `POST /api/projects/{project}/import`, as in §0.4.
-- `setup` builds the Claude Desktop snippet:
+- `GET /api/projects/{project}/bridge`, `GET /api/bridge/setup` and `POST /api/projects/{project}/import`, as in §0.5.
+- `setup` returns the three ready-to-paste snippets with the real token filled in:
 
-  ```json
+  ```jsonc
+  // Claude Desktop: %APPDATA%\Claude\claude_desktop_config.json
   {"mcpServers": {"baton": {"command": "npx", "args": ["-y", "mcp-remote", "http://localhost:8000/mcp/claude/<token>"]}}}
+
+  // Gemini CLI: %USERPROFILE%\.gemini\settings.json (merge into the existing file)
+  {"mcpServers": {"baton": {"httpUrl": "http://localhost:8000/mcp/gemini/<token>", "trust": true}}}
+
+  // Backup, VS Code + Copilot: .vscode/mcp.json
+  {"servers": {"baton": {"type": "http", "url": "http://localhost:8000/mcp/copilot/<token>"}}}
   ```
 
-  It also returns the public URLs when `BATON_PUBLIC_URL` is set.
-
 **B6. Connect the real apps (04:15–05:00, with the integration lead)**
-- **Claude Desktop:**
-  1. Paste the snippet into `%APPDATA%\Claude\claude_desktop_config.json`.
-  2. Restart Claude Desktop.
-  3. Check that the Baton tools appear.
-  4. Say "pick up the baton for demo", and check that a `pull` event shows on the Bridge page.
-- **ChatGPT Go,** if Developer mode exists:
-  1. Run `cloudflared tunnel --url http://localhost:8000` (install with `winget install Cloudflare.cloudflared`).
-  2. Set `BATON_PUBLIC_URL`.
-  3. Add `https://<tunnel>/mcp/chatgpt/<token>` as a connector.
-  4. Check that `record_items` fires.
 
-  If Developer mode doesn't exist, use the Import box.
-- **claude.ai (Pro),** optional: the same tunnel, `/mcp/claude/<token>`, added as a custom connector.
+Both apps run on this laptop and talk to `http://localhost:8000`, so there's **no tunnel** and nothing is exposed to the internet. Do each step, then check it on `/bridge`.
+
+1. **Start Baton:** `uvicorn baton.backend.app:app --port 8000` and `cd web && npm run dev:live`, then open `http://localhost:5173/bridge`.
+2. **Claude Desktop:**
+   1. Copy the Claude snippet from the Setup panel into `%APPDATA%\Claude\claude_desktop_config.json`.
+   2. Quit Claude Desktop fully, including from the system tray, and reopen it.
+   3. Check that the tools icon lists the 5 Baton tools. The first time a tool is used, choose "Allow".
+   4. Say *"pick up the baton for demo"*. A **pull** event must appear in the Claude lane within 2 s.
+3. **Gemini CLI:**
+   1. `npm install -g @google/gemini-cli`, run `gemini`, and choose **Login with Google**.
+   2. Copy the Gemini snippet into `%USERPROFILE%\.gemini\settings.json`. `"trust": true` skips the per-call confirmation, so the demo flows.
+   3. Restart `gemini` and type `/mcp`. The `baton` server should show as connected, with 5 tools.
+   4. Say *"We're adding caching to the recall endpoint on project demo. No Redis, we're on a free tier; use an in-process TTL cache. Record this in Baton."* A **record** event must appear in the Gemini lane, with "Rejected: Redis".
+4. **Cross-check:** in Claude Desktop, *"pick up the baton for demo"* must now show Redis as rejected, with the reason "free tier", recorded by Gemini CLI.
+5. **Optional reliability boost:** put one line in `%USERPROFILE%\.gemini\GEMINI.md` and in a Claude Project's instructions: *"On Baton projects, call pull_baton at the start, check_reply before answering, and record_items after the user decides something."*
+6. **Backup, if Gemini CLI misbehaves:** use VS Code + GitHub Copilot Chat in agent mode with the Copilot snippet in `.vscode/mcp.json`. Its events show in a Copilot lane. Any other app, ChatGPT included, can still hand over by hand with the Import box and Copy baton.
 
 ### 2.4 What you hand the frontend
 
@@ -404,14 +427,14 @@ class ImportExchange(Frozen):
 ### 2.5 Done when
 
 - `pytest tests/backend tests/integration` passes: bug regressions, the bridge service, the MCP round trip, and the HTTP flow.
-- Claude Desktop lists and calls the tools against the live backend.
-- Every bridge call appears in `GET /api/projects/{project}/bridge`.
+- Gemini CLI and Claude Desktop both list and call the tools against the live backend.
+- A Gemini record is visible in Claude's next pull.
 
 ---
 
 ## 3. Frontend owner
 
-**Your job:** everything people see. The landing page, the in-app demo (`/app`), and the new **Bridge page** that makes Baton look like the relay between ChatGPT and Claude.
+**Your job:** everything people see. The landing page, the in-app demo (`/app`), and the new **Bridge page** that makes Baton look like the relay between Gemini and Claude.
 
 ### 3.1 Your files
 
@@ -462,48 +485,56 @@ class ImportExchange(Frozen):
 - **Where:** a new route in `main.tsx` and a "Bridge" link in the TopBar and the landing page's nav.
 - **Data:** a `useBridge(project)` hook polls `GET /api/projects/{project}/bridge` every 2 s, plus `GET /api/bridge/setup` once. The project picker is fed by `GET /api/projects`.
 - **Layout, three columns** (they stack on mobile):
-  - **Left, the ChatGPT lane:** app name and icon; a connection light (green when seen in the last 10 minutes, otherwise grey); last seen ("12 s ago"); counters for pulls, records and checks; and that app's latest events.
-  - **Centre, the Baton:** the shared contract (goal, **next step** emphasised, decisions, constraints, **rejected approaches with reasons**), each line tagged with the app and person who recorded it; the ledger underneath; and a "Copy baton" button.
-  - **Right, the Claude lane:** the same as ChatGPT.
+  - **Left, the Gemini CLI lane:** a Google-blue lane colour; a connection light (green when seen in the last 10 minutes, otherwise grey); last seen ("12 s ago"); counters for pulls, records and checks; and that app's latest events.
+  - **Centre, the Baton:** the shared contract (goal, **next step** emphasised, decisions, constraints, **rejected approaches with reasons**), each line tagged with the app that recorded it ("via Gemini CLI"); the ledger underneath; and a "Copy baton" button.
+  - **Right, the Claude Desktop lane:** the same as Gemini, in Claude's lane colour.
+  - **Extra lanes:** a Copilot or "Imported" lane appears only when `BridgeView.apps` includes it.
 - **Relay timeline** under the columns: every `BridgeEvent`, newest first, with an app icon, action icon, summary and time.
   - A **pass or fail tag** on checks: a failed check shows red, and the next passing check shows green, so a repair is visible.
   - **An animation** when a new event arrives: the baton moves from the lane that recorded to the lane that pulled. Reuse the lane colours in `lib/lanes.ts`, and respect reduced motion.
 - **Empty states:** "No app connected yet", which links to the Setup panel, and "No baton yet for this project".
 
-**F3. The Setup panel (03:15–03:45)** is a drawer on `/bridge`:
-- **Claude Desktop, in three steps:**
-  1. copy the config snippet (`BridgeSetup.claude_desktop_config`);
+**F3. The Setup panel (03:15–03:45)** is a drawer on `/bridge`, with one card per app, each with a copy button and numbered steps:
+- **Claude Desktop:**
+  1. copy the snippet;
   2. paste it into `%APPDATA%\Claude\claude_desktop_config.json`;
-  3. restart Claude, and say "pick up the baton for <project>".
-- **ChatGPT:** if `chatgpt_url` is set, show the steps to add it as a Developer mode connector. If not, explain that ChatGPT uses Import plus Copy baton, and link to the Import box.
-- **claude.ai:** show `public_claude_url` when there is one.
-- **Security:** a note that the URLs contain a private token.
+  3. quit Claude fully (from the tray too) and reopen it;
+  4. say "pick up the baton for <project>".
+- **Gemini CLI:**
+  1. `npm install -g @google/gemini-cli`;
+  2. run `gemini`, then Login with Google;
+  3. paste the snippet into `%USERPROFILE%\.gemini\settings.json`;
+  4. restart, and `/mcp` shows `baton`;
+  5. say "record this in Baton for <project>".
+- **Backup, VS Code + Copilot:** the `.vscode/mcp.json` snippet.
+- **Any other app:** "use Import and Copy baton".
+- **Each card shows the app's status:** a green tick once that app has made its first call.
 
-**F4. The Import box (03:45–04:00)** is a "Paste from ChatGPT" card on `/bridge`:
-- **Fields:** two textareas (your message, ChatGPT's reply) and an app selector.
+**F4. The Import box (03:45–04:00)** is a "Paste from any AI app" card on `/bridge`:
+- **Fields:** two textareas (your message, the AI's reply) and an app selector (Gemini, Claude, Copilot, Other).
 - **Submit:** `POST /api/projects/{project}/import`. Show the recorded items as a toast, and the timeline updates.
 
 **F5. Mock mode and tests (in parallel with F2–F4)**
-- **Mock:** extend `mock.ts` with a scripted bridge story (ChatGPT records → Claude pulls → Claude's check fails → it passes) and fake setup data. That way the page is demo-able without the backend.
+- **Mock:** extend `mock.ts` with a scripted bridge story (Gemini records Redis rejected → Claude pulls → Claude's check fails → it passes) and fake setup snippets. That way the page is demo-able without the backend.
 - **Vitest:**
   - the request shapes for the 3 new endpoints;
-  - the lane status logic (connected vs idle);
+  - the lane status logic (connected vs idle, and extra lanes appearing);
   - the timeline ordering;
   - the Import box posting the right body.
 
 **F6. Landing and polish (05:00–06:30)**
-- **The landing page:** add a chapter, "One baton, every app: ChatGPT ↔ Baton ↔ Claude", with a Bridge mock and a CTA to `/bridge`.
+- **The landing page:** add a chapter, "One baton, every app: Gemini ↔ Baton ↔ Claude", with a Bridge mock and a CTA to `/bridge`.
 - **Demo polish:** make sure the demo path reads well at 1080p for the video.
 
 ### 3.4 What you get from the backend
 
-The 17 existing endpoints and the 3 bridge endpoints (§0.4). Build on mock mode first, then switch to `dev:live`.
+The 17 existing endpoints and the 3 bridge endpoints (§0.5). Build on mock mode first, then switch to `dev:live`.
 
 ### 3.5 Done when
 
 - `npm test` and `npm run build` pass.
 - `/app` and `/bridge` work in mock and live mode.
-- A real Claude Desktop pull appears on `/bridge` within 2 s.
+- Real Gemini CLI and Claude Desktop calls appear on `/bridge` within 2 s.
 
 ---
 
@@ -511,10 +542,11 @@ The 17 existing endpoints and the 3 bridge endpoints (§0.4). Build on mock mode
 
 | Time (IST) | Task |
 | --- | --- |
-| 00:45–01:05 | Land contracts v2 (§0.4), `CLAUDE.md`, requirements, `.env.example`; recreate the worktrees; start the three owners |
-| 01:05–03:30 | Watch progress and answer contract questions. Fix bug 6 and rewrite the README (the bridge story, relative links, setup for both apps, limitations). Write `docs/demo-script.md` |
+| 00:45–01:05 | Land contracts v2 (§0.5), `CLAUDE.md`, requirements, `.env.example`; recreate the worktrees; start the three owners |
+| 01:05–01:20 | Spike S1: install Gemini CLI, log in, confirm `/mcp` works (§0.3) |
+| 01:20–03:30 | Watch progress and answer contract questions. Fix bug 6 and rewrite the README (the bridge story, relative links, Gemini CLI and Claude Desktop setup, limitations). Write `docs/demo-script.md` |
 | 03:30–04:15 | Merge AI → backend → frontend with `--no-ff`. After each merge, run the full suite (`pytest -q`, `npm test`, `npm run build`) and the HTTP integration test |
-| 04:15–05:00 | Connect Claude Desktop and ChatGPT with the backend owner (B6) |
+| 04:15–05:00 | Connect Gemini CLI and Claude Desktop with the backend owner (B6) |
 | 05:00–06:30 | Rehearse the demo twice, end to end, and route fixes to their owners |
 | 06:30–08:30 | Deliverables: record the video; write the article and the LinkedIn and Reddit posts, with the word "hackathon" appearing nowhere; update `done.md` |
 | 08:30–09:00 | Buffer, final push, submit |
@@ -533,19 +565,19 @@ The 17 existing endpoints and the 3 bridge endpoints (§0.4). Build on mock mode
    2. Click "Exhaust rate limit". A real 429 hands off to Gemini, and the banner shows it.
    3. Re-run with memory OFF: Gemini asks what you're building and suggests Redis, and the chips go red.
    4. Re-run with memory ON: Gemini continues from the next step, and the chips go green.
-2. **The bridge (about 90 s).**
-   1. `/bridge` with ChatGPT and Claude lanes.
-   2. In ChatGPT, plan and reject Redis. It's recorded, through the tool or the Import box.
-   3. In Claude Desktop, say "pick up the baton for demo". Claude pulls it, continues from the next step, and checks its draft.
-   4. The Bridge page animates the relay and shows each event.
-3. **Close (about 20 s).** Copy baton works anywhere. Say why this isn't memory: typed items, the rejection ledger, the checks, provenance.
+2. **The bridge (about 90 s).** Split screen: Gemini CLI terminal | `/bridge` | Claude Desktop.
+   1. In Gemini CLI, plan the caching, reject Redis, and ask it to record in Baton. A record event appears in the Gemini lane.
+   2. "Gemini's out of quota, or I want Claude for the implementation": in Claude Desktop, say "pick up the baton for demo". A pull appears, and Claude continues from the next step.
+   3. Claude drafts, calls `check_reply`, and passes. If the draft names Redis, the timeline shows red and then green.
+   4. Claude records the next decision. Back in Gemini CLI, `pull_baton` shows it. The baton went both ways.
+3. **Close (about 20 s).** Any other app can join through Import and Copy baton. Say why this isn't memory: typed items, the rejection ledger, the checks, provenance.
 
 ---
 
 ## 6. Optional, only if API keys appear
 
-Claude and GPT as models **inside** Baton's own chat:
-- **GPT:** the `openai:` provider (A4) plus `OPENAI_API_KEY`.
+GPT and Claude as models **inside** Baton's own chat:
+- **GPT:** an `openai:` provider added to `baton/ai/build.py` (reusing `OpenAICompatModel`) plus `OPENAI_API_KEY`.
 - **Claude:** a new `baton/ai/anthropic_provider.py`, built on the official `anthropic` SDK:
   - model `claude-opus-5-5`, `max_retries=0`;
   - the Baton system message goes in `system`;
@@ -566,8 +598,8 @@ This is out of the 09:00 scope, because it can't be tested without keys.
 - **Live, after the AI merge and again before recording:** `python -m pytest -m live -q`, which covers each model, strict-schema extraction, and the Hindsight retain → recall with metadata intact.
 - **UI:** Playwright drives `/app` through the in-app acts, and `/bridge` to confirm events appear after tool calls.
 - **Bridge:**
-  - Claude Desktop lists the 5 Baton tools.
-  - "Pick up the baton for demo" returns the contract.
+  - `/mcp` in Gemini CLI and the tools icon in Claude Desktop each list the 5 Baton tools.
+  - "Pick up the baton for demo" returns the contract in both apps.
   - A draft mentioning Redis fails `check_reply` with evidence.
   - Each call appears on `/bridge` within 2 s.
-  - ChatGPT's record, over the tunnel or through Import, is visible to Claude's next pull.
+  - What Gemini records is visible in Claude's next pull, and the other way round.
