@@ -35,6 +35,7 @@ from typing import Literal
 from baton.interfaces.ai import BurstResult, ModelStatus
 from baton.interfaces.types import (
     Alert,
+    BridgeEvent,
     CheckId,
     Frozen,
     HandoffEvent,
@@ -173,3 +174,33 @@ class TraceView(Frozen):
 class BurstView(Frozen):
     result: BurstResult
     alerts: tuple[Alert, ...] = ()
+
+
+class AppStatus(Frozen):
+    app: Literal["chatgpt", "claude"]
+    connected: bool
+    last_seen: datetime | None
+    pulls: int
+    records: int
+    checks: int
+
+
+class BridgeView(Frozen):
+    project: str
+    apps: tuple[AppStatus, ...]
+    events: tuple[BridgeEvent, ...]
+    contract: ContractView
+    ledger: tuple[LedgerRow, ...]
+
+
+class BridgeSetup(Frozen):
+    claude_desktop_config: str
+    claude_url: str
+    chatgpt_url: str | None
+    public_claude_url: str | None
+
+
+class ImportExchange(Frozen):
+    app: Literal["chatgpt", "claude"] = "chatgpt"
+    user_message: str
+    assistant_reply: str

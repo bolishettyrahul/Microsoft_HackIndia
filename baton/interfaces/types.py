@@ -13,11 +13,32 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict
 
-CONTRACT_VERSION = "2h-1.0"
+CONTRACT_VERSION = "2h-2.0"
 
 
 class Frozen(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+BridgeApp = Literal["chatgpt", "claude", "baton"]
+
+
+class BridgeEvent(Frozen):
+    at: datetime
+    project: str
+    app: BridgeApp
+    action: Literal["pull", "record", "check", "import"]
+    summary: str
+    items: int = 0
+    passed: bool | None = None
+
+
+class BridgeActivity(Frozen):
+    app: Literal["chatgpt", "claude"]
+    last_seen: datetime | None = None
+    pulls: int = 0
+    records: int = 0
+    checks: int = 0
 
 
 def new_id() -> str:
