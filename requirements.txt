@@ -6,4 +6,4 @@ hindsight-client>=0.10.1
 python-dotenv>=1.0
 httpx>=0.27
 pytest>=8.0
-mcp>=1.0
+mcp>=1.26,<2

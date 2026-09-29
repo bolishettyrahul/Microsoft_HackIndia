@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException
+from contextlib import AsyncExitStack, asynccontextmanager
+from threading import Lock
+
+from fastapi import FastAPI, HTTPException, Request
+from pydantic import ValidationError
 
 from baton.backend.facade import Baton
 from baton.backend.wiring import build_baton
+from baton.backend.bridge_setup import connection_settings, setup_view
+from baton.backend.mcp_server import build_mcp
 from baton.config import load_settings
 from baton.interfaces.api import (
     ReverseRejection,
@@ -13,17 +19,34 @@ from baton.interfaces.api import (
     StartSession,
     UpdateSession,
     UseModel,
+    BridgeView,
+    BridgeSetup,
+    ImportExchange,
 )
 
 
 def create_app(api: Baton | None = None) -> FastAPI:
-    application = FastAPI(title="Baton API", version="1.0")
+    settings = api.settings if api is not None else load_settings()
+    token, public_url = connection_settings(settings)
+    servers = []
+
+    @asynccontextmanager
+    async def lifespan(application):
+        async with AsyncExitStack() as stack:
+            for server in servers:
+                await stack.enter_async_context(server.session_manager.run())
+            yield
+
+    application = FastAPI(title="Baton API", version="2.0", lifespan=lifespan)
+    application.state.mcp_token = token
+    build_lock = Lock()
     if api is not None:
         application.state.baton = api
 
     def backend() -> Baton:
-        if not hasattr(application.state, "baton"):
-            application.state.baton = build_baton(load_settings())
+        with build_lock:
+            if not hasattr(application.state, "baton"):
+                application.state.baton = build_baton(settings)
         return application.state.baton
 
     def call(method, *args, **kwargs):
@@ -32,6 +55,20 @@ def create_app(api: Baton | None = None) -> FastAPI:
         except KeyError as exc:
             detail = str(exc.args[0]) if exc.args else "Not found"
             raise HTTPException(status_code=404, detail=detail) from exc
+        except (ValueError, ValidationError) as exc:
+            raise HTTPException(status_code=422, detail="Invalid bridge request" if isinstance(exc, ValidationError) else str(exc)) from exc
+
+    @application.get("/api/projects/{project}/bridge", response_model=BridgeView)
+    def bridge_view(project: str):
+        return call(backend().bridge.view, project)
+
+    @application.get("/api/bridge/setup", response_model=BridgeSetup)
+    def bridge_setup(request: Request):
+        return setup_view(token, public_url, local_url=str(request.base_url).rstrip("/"))
+
+    @application.post("/api/projects/{project}/import", response_model=BridgeView)
+    def import_exchange(project: str, body: ImportExchange):
+        return call(backend().bridge.import_exchange, project, body.app, body.user_message, body.assistant_reply)
 
     @application.get("/api/health")
     def health():
@@ -104,6 +141,11 @@ def create_app(api: Baton | None = None) -> FastAPI:
     def refresh(sid: str):
         return call(backend().trace, sid, refresh=True)
 
+    for source in ("claude", "chatgpt"):
+        server = build_mcp(lambda: backend().bridge, source, public_url=public_url)
+        application.mount(f"/mcp/{source}/{token}", server.streamable_http_app())
+        servers.append(server)
+    application.state.mcp_servers = tuple(servers)
     return application
 
 

@@ -29,11 +29,11 @@ class Settings:
         "gemini:gemini-3.5-flash-lite",
     )
     ai: str = "real"  # "real" or "fake"
+    mcp_token: str | None = None
+    public_url: str | None = None
     db_path: str = "baton.db"
     history_window: int = 6
     recall_timeout: float = 5.0
-    mcp_token: str = "local-dev-token"
-    public_url: str | None = None
     extra: dict[str, str] = field(default_factory=dict)
 
 
@@ -50,9 +50,9 @@ def load_settings() -> Settings:
         model_chain=_split(os.getenv("BATON_MODEL_CHAIN", "")) or defaults.model_chain,
         extractor_chain=_split(os.getenv("BATON_EXTRACTOR_CHAIN", "")) or defaults.extractor_chain,
         ai=os.getenv("BATON_AI", defaults.ai),
+        mcp_token=os.getenv("BATON_MCP_TOKEN") or None,
+        public_url=os.getenv("BATON_PUBLIC_URL") or None,
         db_path=os.getenv("BATON_DB_PATH", defaults.db_path),
         history_window=int(os.getenv("BATON_HISTORY_WINDOW", defaults.history_window)),
         recall_timeout=float(os.getenv("BATON_RECALL_TIMEOUT", defaults.recall_timeout)),
-        mcp_token=os.getenv("BATON_MCP_TOKEN") or defaults.mcp_token,
-        public_url=os.getenv("BATON_PUBLIC_URL") or None,
     )

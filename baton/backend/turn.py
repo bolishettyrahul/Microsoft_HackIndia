@@ -6,8 +6,9 @@ from dataclasses import dataclass
 from typing import Callable, Sequence
 
 from baton.backend.compose import compose, strip_reasoning
-from baton.backend.contract import ContractState, combine, render, resolve, validate_aliases
-from baton.backend.redact import redact, redact_item
+from baton.backend.contract import ContractState, combine, render
+from baton.backend.extraction import build_items
+from baton.backend.redact import redact
 from baton.backend.verifier import verify
 from baton.config import Settings
 from baton.interfaces.ai import AIServices, ChatModel, MessageRecord, SessionRecord
@@ -19,12 +20,8 @@ from baton.interfaces.types import (
     CheckId,
     CheckResult,
     HandoffEvent,
-    Item,
-    ItemKind,
     L2Snapshot,
     Message,
-    Preferences,
-    new_id,
     turn_document_id,
     utcnow,
 )
@@ -77,6 +74,18 @@ class TurnRunner:
     ai: AIServices
     settings: Settings
     snapshot: SnapshotGetter
+
+    def _unavailable(self, model_id: str, error: ModelUnavailable) -> Alert:
+        """Apply the same provider failure policy to initial and repair calls."""
+        if error.reason == "auth":
+            self.ai.chain.disable(model_id, redact(error.detail or "authentication failed"))
+        elif error.reason == "error":
+            self.ai.chain.cool_down(model_id, 30.0)
+        return Alert(
+            level="red" if error.reason == "auth" else "amber",
+            code=AlertCode.MODEL_UNAVAILABLE,
+            message=redact(str(error)),
+        )
 
     def _state(self, session: SessionRecord, snapshot: L2Snapshot, before_turn: int | None = None) -> ContractState:
         return combine(
@@ -138,52 +147,10 @@ class TurnRunner:
             reply=redact(reply),
             contract_text=redact(render(state)),
         )
-        alerts = list(result.alerts)
-        existing = list(self.ai.store.items(session.id))
-        created: list[Item] = []
-        prefs = session.prefs
-        for extracted in result.items:
-            kind = ItemKind(extracted.kind)
-            supersedes = None
-            if kind == ItemKind.REVERSAL:
-                target = resolve((*existing, *created), extracted.target or extracted.text, (ItemKind.REJECTION,))
-                if target is None:
-                    alerts.append(Alert(
-                        level="amber",
-                        code=AlertCode.REVERSAL_UNMATCHED,
-                        message=f"Could not match reversal target: {extracted.target or extracted.text}",
-                    ))
-                    continue
-                supersedes = target.id
-            elif kind == ItemKind.RESOLVED:
-                target = resolve((*existing, *created), extracted.target or extracted.text, (ItemKind.OPEN_QUESTION,))
-                if target is None:
-                    continue
-                supersedes = target.id
-            item = Item(
-                id=new_id(),
-                kind=kind,
-                text=redact(extracted.text),
-                reason=redact(extracted.reason) if extracted.reason else None,
-                aliases=tuple(redact(value) for value in extracted.aliases),
-                check_id=extracted.check_id,
-                supersedes=supersedes,
-                session_id=session.id,
-                project=session.project,
-                user=session.user,
-                turn=turn,
-                model=model_id,
-                source="extractor",
-                created_at=utcnow(),
-            )
-            if kind == ItemKind.REJECTION:
-                item = item.model_copy(update={"aliases": validate_aliases(item, (*existing, *created))})
-            if kind == ItemKind.PREFERENCE:
-                if item.check_id == CheckId.NO_BULLETS:
-                    prefs = prefs.model_copy(update={"no_bullets": True})
-                elif item.text not in prefs.free_text:
-                    prefs = prefs.model_copy(update={"free_text": (*prefs.free_text, item.text)})
-            created.append(redact_item(item))
+        created, prefs, alerts = build_items(
+            result, session=session, turn=turn, model_id=model_id,
+            existing=self.ai.store.items(session.id),
+        )
 
         if prefs != session.prefs:
             self.ai.store.update_session(session.id, prefs=prefs)
@@ -266,12 +233,7 @@ class TurnRunner:
                 if isinstance(exc, RateLimited):
                     self.ai.chain.cool_down(model_id, exc.retry_after)
                 else:
-                    self.ai.chain.disable(model_id, exc.detail)
-                    alerts.append(Alert(
-                        level="red" if exc.reason == "auth" else "amber",
-                        code=AlertCode.MODEL_UNAVAILABLE,
-                        message=str(exc),
-                    ))
+                    alerts.append(self._unavailable(model_id, exc))
                 refreshed = self.snapshot(session.project, True)
                 state = self._state(session, refreshed, before_turn=turn if rerun else None)
                 contract_text = redact(render(state))
@@ -295,7 +257,12 @@ class TurnRunner:
                 continue
 
             text = strip_reasoning(completion.text)
-            seen_model = any(value.model == model_id and value.attempt != "user" for value in records)
+            seen_model = any(
+                value.model == model_id
+                and value.attempt != "user"
+                and value.turn < turn
+                for value in records
+            )
             results = verify(text, state, continuity=state.has_context and not seen_model)
             first = self._save_reply(
                 session, turn, model_id, text, "rerun" if rerun else "first", memory_on, results
@@ -333,10 +300,11 @@ class TurnRunner:
                         message="Repair retry was rate-limited; showing the first reply.",
                     ))
                 except ModelUnavailable as exc:
+                    alerts.append(self._unavailable(model_id, exc))
                     alerts.append(Alert(
                         level="amber",
                         code=AlertCode.REPAIR_SKIPPED,
-                        message=f"Repair retry was unavailable: {exc.detail}",
+                        message=redact(f"Repair retry was unavailable: {exc.detail}"),
                     ))
             self.ai.chain.set_active(session_id, model_id)
             self.ai.store.set_final(session_id, turn, reply_view.message_id)

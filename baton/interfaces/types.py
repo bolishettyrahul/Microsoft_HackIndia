@@ -15,11 +15,12 @@ from pydantic import BaseModel, ConfigDict
 
 CONTRACT_VERSION = "2h-3.0"
 
-BridgeApp = Literal["chatgpt", "claude", "baton"]
-
 
 class Frozen(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+BridgeApp = Literal["chatgpt", "claude", "baton"]
 
 
 def new_id() -> str:
@@ -155,6 +156,14 @@ class BridgeEvent(Frozen):
     summary: str
     items: int = 0
     passed: bool | None = None
+
+
+class BridgeActivity(Frozen):
+    app: Literal["chatgpt", "claude"]
+    last_seen: datetime | None = None
+    pulls: int = 0
+    records: int = 0
+    checks: int = 0
 
 
 class RecallTrace(Frozen):

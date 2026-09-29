@@ -6,19 +6,21 @@ from collections import defaultdict
 from threading import RLock
 
 from baton.backend.contract import combine, ledger, line, render
+from baton.backend.bridge import Bridge
 from baton.backend.redact import redact
-from baton.backend.turn import TurnRunner, rerun_last_turn, run_turn
+from baton.backend.turn import TurnRunner, _chip, rerun_last_turn, run_turn
 from baton.config import Settings
 from baton.interfaces.ai import AIServices
 from baton.interfaces.api import (
     BurstView,
     ContractView,
     Health,
+    ReplyView,
     SessionView,
     TraceView,
     TurnView,
 )
-from baton.interfaces.types import HandoffEvent, Item, ItemKind, L2Snapshot, new_id, utcnow
+from baton.interfaces.types import CheckId, HandoffEvent, Item, ItemKind, L2Snapshot, new_id, utcnow
 
 
 class Baton:
@@ -27,6 +29,7 @@ class Baton:
     def __init__(self, settings: Settings, ai: AIServices) -> None:
         self.settings = settings
         self.ai = ai
+        self.bridge = Bridge(ai, settings)
         self._snapshots: dict[str, L2Snapshot] = {}
         self._turns: dict[str, list[TurnView]] = defaultdict(list)
         self._locks: dict[str, RLock] = defaultdict(RLock)
@@ -76,10 +79,64 @@ class Baton:
 
     def turns(self, session_id: str) -> tuple[TurnView, ...]:
         self.ai.store.get_session(session_id)
+        if not self._turns[session_id]:
+            self._turns[session_id] = self._restore_turns(session_id)
         return tuple(self._turns[session_id])
+
+    def _restore_turns(self, session_id: str) -> list[TurnView]:
+        """Rebuild the transcript views from durable Store records after a restart."""
+        records = self.ai.store.messages(session_id)
+        by_turn = defaultdict(list)
+        for record in records:
+            by_turn[record.turn].append(record)
+        model_labels = {
+            model.profile.id: model.profile.label for model in self.ai.chain.models()
+        }
+        handoffs = defaultdict(list)
+        for turn, event in self.ai.store.handoffs(session_id):
+            handoffs[turn].append(event)
+
+        restored: list[TurnView] = []
+        last_turn = max(by_turn, default=0)
+        for turn in sorted(by_turn):
+            values = by_turn[turn]
+            users = [value for value in values if value.attempt == "user"]
+            assistants = [value for value in values if value.attempt != "user"]
+
+            def reply(record) -> ReplyView:
+                results = self.ai.store.verifications(record.id) if record.id is not None else ()
+                # Stores need not preserve insertion order; keep live and restored
+                # check chips in the same order as the verifier.
+                results = sorted(results, key=lambda result: tuple(CheckId).index(result.check_id))
+                return ReplyView(
+                    message_id=record.id or 0,
+                    model_id=record.model or "unknown",
+                    model_label=model_labels.get(record.model, record.model or "Unknown model"),
+                    text=record.content,
+                    memory_on=record.memory_on,
+                    attempt=record.attempt,
+                    chips=tuple(_chip(result) for result in results if result.status != "n/a"),
+                )
+
+            final_record = next((value for value in reversed(assistants) if value.is_final), None)
+            final = reply(final_record) if final_record else None
+            earlier = tuple(reply(value) for value in assistants if not value.is_final)
+            can_rerun = turn == last_turn and final is not None
+            restored.append(TurnView(
+                session_id=session_id,
+                turn=turn,
+                user_text=users[-1].content if users else "",
+                reply=final,
+                earlier_attempts=earlier,
+                handoffs=tuple(handoffs[turn]),
+                can_rerun=can_rerun,
+                rerun_memory_on=not final.memory_on if can_rerun and final else None,
+            ))
+        return restored
 
     def send(self, session_id: str, text: str) -> TurnView:
         with self._locks[session_id]:
+            self.turns(session_id)
             previous = self._turns[session_id]
             if previous:
                 previous[-1] = previous[-1].model_copy(update={"can_rerun": False, "rerun_memory_on": None})
@@ -89,6 +146,7 @@ class Baton:
 
     def rerun(self, session_id: str) -> TurnView:
         with self._locks[session_id]:
+            self.turns(session_id)
             if not self._turns[session_id]:
                 raise KeyError("No turn to rerun")
             old = self._turns[session_id][-1]
