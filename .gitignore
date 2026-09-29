@@ -10,3 +10,6 @@ __pycache__/
 # Local data
 baton.db
 baton.db-*
+
+# Sector worktrees (ai, backend, frontend) live inside the repo folder
+.claude/worktrees/

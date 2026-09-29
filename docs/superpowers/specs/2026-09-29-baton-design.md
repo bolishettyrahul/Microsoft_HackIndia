@@ -64,7 +64,7 @@ Version 1 is a demo and portfolio piece. It runs locally as a Streamlit app on G
 
 **A. The report's layout as written.** One Streamlit process calls the orchestrator directly, and background retains run on a thread pool that shares one cached Hindsight client. It's the simplest, but the client runs its coroutines on the calling thread's event loop, so sharing it across Streamlit's script thread and pool threads risks "attached to a different loop" failures. Parallel recalls would still need an event loop somewhere.
 
-**B. The report's layers with a memory service (recommended).** The same one-process, five-layer design, plus one daemon thread that runs an asyncio event loop and owns the Hindsight client. Everything else submits coroutines to that loop and waits with a timeout. This fixes the loop binding, runs the three handoff recalls in parallel, makes retains fire-and-forget, and applies timeouts in one place. It costs one extra module of about 80 lines.
+**B. The report's layers with a memory service (recommended).** The same one-process design, organised in three tiers (§6), plus one daemon thread that runs an asyncio event loop and owns the Hindsight client. Everything else submits coroutines to that loop and waits with a timeout. This fixes the loop binding, runs the three handoff recalls in parallel, makes retains fire-and-forget, and applies timeouts in one place. It costs one extra module of about 80 lines.
 
 **C. A separate backend.** A FastAPI service runs the orchestrator, and Streamlit talks to it over HTTP. That would be ready for a future extension, but it doubles the processes and builds the API the user ruled out, and the demo gains nothing from it.
 
@@ -72,75 +72,80 @@ Version 1 is a demo and portfolio piece. It runs locally as a Streamlit app on G
 
 ## 6. Architecture
 
-Five layers. Each layer calls only the layers below it. The engine's modules are pure (no I/O), so they're tested without fakes. The code is organised by **sector** so that parallel branches never edit the same files. `2026-09-29-baton-sectors-and-contracts.md` defines the sectors, who owns which files, and the exact interfaces between them.
+Three tiers, each built by its own sector in its own worktree:
+- the frontend calls the backend only through `BatonAPI`;
+- the backend calls the AI tier only through `AIServices`.
 
-| # | Layer | Package (sector) | Touches network or disk? |
-| --- | --- | --- | --- |
-| 1 | Interface | `app.py`, `baton/ui/` (S5) | No; it calls only `BatonAPI` |
-| 2 | Turn loop | `baton/orchestrator/` (S4): the turn loop, the `BatonAPI` facade, wiring | No |
-| 3 | Agent | `baton/engine/` (S1): contract merge and render, verifier, patches, compose, redaction. `baton/llm/extractor.py` (S2). | No; the extractor calls through the model layer |
-| 4 | Memory | `baton/memory/` (S3): the `Store` and `LongTermMemory` implementations | Only through the data layer |
-| 5 | Data | `baton/llm/` provider and chain (S2); `baton/memory/store.py` (SQLite) and `baton/memory/service.py` (the Hindsight event-loop thread) (S3) | Yes. Only this layer does. |
+`2026-09-29-baton-sectors-and-contracts.md` defines both handoff contracts, maps every UI control to the call it makes, and says who owns which files.
 
-Every layer may import the shared types and protocols in `baton/interfaces/` (S0).
+```text
+Frontend ──BatonAPI──► Backend ──AIServices──► AI ──► Groq, Gemini, Ollama, Hindsight, SQLite
+```
 
-**Redaction has one choke point.** The orchestrator runs every item and message through the engine's `redact` before handing it to the store or long-term memory. A contract test proves that a secret typed into chat never reaches either one.
+| Tier | Package | What it does |
+| --- | --- | --- |
+| Frontend | `app.py`, `baton/ui/` | Shows the sidebar, the chat and the five tabs (§15). Every action calls one `BatonAPI` method. |
+| Backend | `baton/backend/` | **The engine:** contract merge and rendering, the ledger, the verifier and patch ladder, prompt building, redaction. **The orchestrator:** the turn loop, handoffs, repair, re-runs and the retain outbox. Implements `BatonAPI`. |
+| AI | `baton/ai/` | **Models:** provider calls, the chain and cooldowns, the burst, the extractor. **Memory and cache:** the SQLite store (L1 working memory and records), Hindsight (L2), and the event-loop thread that owns the Hindsight client. Only this tier touches the network or disk. |
+
+The shared types and both contracts live in `baton/interfaces/`, which every tier may import. The engine's functions are pure, so they're tested without fakes.
+
+**Redaction has one choke point.** The backend runs every item and message through `redact` before handing it to the AI tier's store or long-term memory. A contract test proves that a secret typed into chat never reaches either one.
 
 ### Repository layout
 
 ```text
 baton/
-  config.py              settings from .env; limits                              S0
-  interfaces/            types, protocols, errors, views, fakes                   S0
-  engine/                                                                         S1
+  config.py              settings from .env; limits
+  interfaces/            shared types, both contracts, errors, views, fakes
+  ai/
+    profiles.py          the model profiles in §9.1
+    provider.py          OpenAICompatModel: one class for Groq, Gemini and Ollama
+    chain.py             ModelChain: active model, cooldowns, status, burst
+    extractor.py         Extractor; strict_schema()
+    store.py             SQLite Store: L1 working memory, messages, checks, stats (WAL mode)
+    hindsight.py         the Hindsight event-loop thread and LongTermMemory (L2)
+    build.py             build_ai(settings) -> AIServices
+  backend/
     contract.py          combine(), ledger(), render(), resolve()
     redact.py            redact(), redact_item()
     verifier.py          verify()
     patches.py           choose_levels(), escalate(), patch_set()
     compose.py           compose(), strip_reasoning()
-  llm/                                                                            S2
-    profiles.py          the model profiles in §9.1
-    provider.py          OpenAICompatModel: one class for Groq, Gemini and Ollama
-    chain.py             ModelChain: active model, cooldowns, status, burst
-    extractor.py         Extractor; strict_schema()
-  memory/                                                                         S3
-    store.py             the SQLite Store (WAL mode)
-    service.py           MemoryService: event-loop thread, submit(coro, timeout)
-    longterm.py          LongTermMemory over Hindsight: bank setup, retain, snapshot, team, why
-  orchestrator/                                                                   S4
-    turn.py              run_turn(), rerun_last_turn()
-    facade.py            Baton, the BatonAPI implementation, and its view builders
-    wiring.py            build_baton(settings): the real graph, or FakeBaton
-  ui/                                                                             S5
+    turn.py              run_turn(), rerun_last_turn(), the retain outbox
+    facade.py            Baton: the BatonAPI implementation and its view builders
+    wiring.py            build_baton(settings, ai=None) -> BatonAPI
+  ui/
     sidebar.py  chat.py  tab_baton.py  tab_ledger.py  tab_trace.py
     tab_learning.py  tab_team.py
-app.py                   Streamlit entry point                                    S5
+app.py                   Streamlit entry point
 scripts/
-  check_ownership.py     fails if a branch edits files outside its sector         S0
-  check_setup.py         checks keys, models, the bank, and the quota headers     S6
-  measure_prefs.py       level-0 violation rates for each model and check         S6
-  seed_demo.py           real past sessions for the learning chart                S6
-  seed_sessions.json     scripted user turns for seeding                          S6
+  check_ownership.py     fails if a branch edits files outside its sector
+  check_setup.py         checks keys, models, the bank, and the quota headers
+  measure_prefs.py       level-0 violation rates for each model and check
+  seed_demo.py           real past sessions for the learning chart
+  seed_sessions.json     scripted user turns for seeding
 tests/
-  contracts/             one suite per protocol, plus boundary checks             S0
-  engine/  llm/  memory/  orchestrator/  ui/                                       one per sector
-  scenario/              the demo acts, with fake models and fake memory          S4
-  live/                  opt-in (-m live), needs keys                             S2, S3
+  contracts/             one suite per protocol, plus boundary checks
+  ai/  backend/  ui/     one per sector
+  scenario/              the demo acts, on fake AI
+  live/                  opt-in (-m live), needs keys
 docs/                    research, specs, plans, demo-script.md
 README.md  ARCHITECTURE.md  .env.example  requirements.txt  pyproject.toml
 ```
 
 ### Runtime objects
 
-Streamlit reruns the whole script on every interaction, so `app.py` creates one `BatonAPI` per process with `st.cache_resource`. The facade owns the long-lived objects:
-- the `Store`
-- the `MemoryService` thread
-- the `ModelChain`, with one client per model and the global cooldowns
-- a `ThreadPoolExecutor(max_workers=2)` for background jobs
+Streamlit reruns the whole script on every interaction, so `app.py` creates one `BatonAPI` per process with `st.cache_resource`. `build_baton` calls `build_ai`, which creates the long-lived AI objects:
+- the store;
+- the Hindsight thread;
+- the model chain, with one client per model and the global cooldowns.
+
+The backend adds a `ThreadPoolExecutor(max_workers=2)` for background jobs.
 
 **Where state lives:**
 - **Global:** cooldowns, because rate limits belong to the API key, not the browser tab.
-- **Per session, in the facade:** benched models and each session's L2 snapshot.
+- **Per session, in the backend:** benched models and each session's L2 snapshot.
 - **In the UI:** only the session id, the `turn_in_flight` guard, and its own display state, all in `st.session_state`.
 
 ## 7. The contract and its items
@@ -199,7 +204,7 @@ Preference: No bullet lists in answers.
 
 ## 8. The turn loop
 
-`run_turn` in `baton/orchestrator/turn.py` owns the loop, and `BatonAPI.send` returns its result as a `TurnView`. A `TurnView` holds the final reply and its model, the check chips, any earlier attempts (such as the first attempt of a repaired reply), handoff events, the memory flag, **alerts**, and an optional fallback contract.
+`run_turn` in `baton/backend/turn.py` owns the loop, and `BatonAPI.send` returns its result as a `TurnView`. A `TurnView` holds the final reply and its model, the check chips, any earlier attempts (such as the first attempt of a repaired reply), handoff events, the memory flag, **alerts**, and an optional fallback contract.
 
 **Alerts rule:** every caught exception in the orchestrator, memory or model code either re-raises or adds a typed `Alert(level, code, message)` to the result. (The type isn't called `Warning`, so it doesn't shadow Python's built-in.) The UI renders every alert. Tests assert on them.
 
@@ -294,7 +299,7 @@ One class, `OpenAICompatModel`, wraps the `openai` SDK with `max_retries=0` and 
 
 ### 9.4 Burst ("Exhaust rate limit")
 
-`orchestrator.burst(model)` exists for Groq models only. It sends real requests, each with a padded prompt of about 2,500 tokens and `max_tokens=1`, until Groq returns a 429, up to 6 requests. Against the 8K tokens-a-minute limit, that takes about 4 requests and roughly 10K of the 200K daily tokens.
+`BatonAPI.burst(model_id)` exists for Groq models only. It sends real requests, each with a padded prompt of about 2,500 tokens and `max_tokens=1`, until Groq returns a 429, up to 6 requests. Against the 8K tokens-a-minute limit, that takes about 4 requests and roughly 10K of the 200K daily tokens.
 
 It returns the number of requests, the tokens sent and `retry_after`, and puts the model into cooldown. The button is labelled "sends real requests", and the result appears as a banner.
 
@@ -420,7 +425,7 @@ The results are saved to the `recalls` table for the Memory trace tab: queries, 
 
 ### 12.4 Merging L1 and L2
 
-The orchestrator builds the contract with the engine's `combine(l1, l2, session_id=..., project=..., prefs=...)`. `LongTermMemory.snapshot` has already done step 1.
+The backend builds the contract with `combine(l1, l2, session_id=..., project=..., prefs=...)`. `LongTermMemory.snapshot` has already done step 1.
 1. Turn L2 results into items using their metadata. Results without `item_id` metadata, such as observations, become notes for the UI, not contract items.
 2. Drop L2 items from the current session, because L1 is authoritative for the current session.
 3. Combine the L2 items with the L1 items, remove duplicates by `item_id` and then by normalised text, and apply supersession and the merge rules (§7.1). For the latest-wins fields, compare `created_at` across both tiers.
@@ -436,7 +441,7 @@ The orchestrator builds the contract with the engine's `combine(l1, l2, session_
 `MemoryService` starts a daemon thread that runs an asyncio event loop and creates the Hindsight client on it.
 - `submit(coro, timeout)` wraps `asyncio.run_coroutine_threadsafe(...).result(timeout)`.
 - `fire(coro)` doesn't wait.
-- The **orchestrator**, not the memory service, re-retains any turn that still has items with `retained = 0`, every 60 s and at startup, so a crash never loses a decision. `LongTermMemory` therefore doesn't need the store.
+- The **backend**, not the memory service, re-retains any turn that still has items with `retained = 0`, every 60 s and at startup, so a crash never loses a decision. `LongTermMemory` therefore doesn't need the store.
 - A 402 (out of credits) switches the service to L1-only mode with a red banner.
 
 ### 12.6 Team view
@@ -557,7 +562,7 @@ A single Streamlit page: the chat on the left (60%), the tabs on the right (40%)
 
 - **`check_setup.py`** confirms that each key works, that each model answers, and that the bank exists, and it prints the quota headers.
 - **`measure_prefs.py --trials 5`** runs fixed prompts at level 0 for every model and check, and prints a table of violation rates. It writes to `demo/measurements.json`, not to `patch_stats`. That's 3 models × 5 checks × 5 trials, or 75 calls. `--models` and `--checks` narrow it if Gemini's daily quota is small.
-- **`seed_demo.py --sessions 6`** runs the scripted turns in `seed_sessions.json` through the real orchestrator with memory ON, including a manual handoff in each session, on the same project. The seeded sessions cover *other features* (auth, logging), so their decisions don't collide with the demo's caching story. The script can resume where it stopped and throttles itself to stay under each model's requests-per-minute limit.
+- **`seed_demo.py --sessions 6`** runs the scripted turns in `seed_sessions.json` through the real backend with memory ON, including a manual handoff in each session, on the same project. The seeded sessions cover *other features* (auth, logging), so their decisions don't collide with the demo's caching story. The script can resume where it stopped and throttles itself to stay under each model's requests-per-minute limit.
 
 ### 16.3 Checklist before recording
 
@@ -607,11 +612,9 @@ A single Streamlit page: the chat on the left (60%), the tabs on the right (40%)
 
 ## 19. Build order
 
-The work is split into seven sectors that are built in parallel, one worktree each. The sectors document gives the file ownership, the contracts, and the merge gates G0 to G7. The implementation plans break each sector into tasks.
+The work is split into three sectors (AI, backend and frontend), built in parallel, one worktree each, after the shared contracts land on `main`. The sectors document gives the file ownership, the contracts, and the merge gates G0 to G5. The implementation plans break each sector into tasks.
 
-The §21 spikes run at the start of the sector that depends on each one:
-- **Sector 2 (models):** the Gemini compatibility endpoint's 429 and strict schema; Qwen with thinking off; how many requests the burst needs.
-- **Sector 3 (memory):** the Hindsight client on its own loop thread; verbatim mode, tags and metadata; retain latency.
+The AI sector starts with the §21 spikes: the Gemini compatibility endpoint's 429 and strict schema; Qwen with thinking off; how many requests the burst needs; the Hindsight client on its own event-loop thread; verbatim mode, tags and metadata; and retain latency.
 
 ## 20. Limitations (these go in the README) and roadmap
 
