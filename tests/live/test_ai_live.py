@@ -22,14 +22,20 @@ def _provider_key(settings: Settings, provider: str) -> str | None:
         return settings.groq_api_key
     if provider == "gemini":
         return settings.gemini_api_key
-    return None
+    if provider == "openai":
+        return settings.openai_api_key
+    raise ValueError(f"unsupported provider: {provider}")
 
 
 def _live_model(settings: Settings, model_id: str) -> OpenAICompatModel:
     profile = _profile(model_id)
     key = _provider_key(settings, profile.provider)
     if not key:
-        variable = "GROQ_API_KEY" if profile.provider == "groq" else "GEMINI_API_KEY"
+        variable = {
+            "groq": "GROQ_API_KEY",
+            "gemini": "GEMINI_API_KEY",
+            "openai": "OPENAI_API_KEY",
+        }[profile.provider]
         pytest.skip(f"{variable} is not configured")
     return OpenAICompatModel(profile, key)
 
@@ -141,5 +147,18 @@ def test_hindsight_retain_recall_preserves_item_metadata() -> None:
         assert found[rejection.id].aliases == rejection.aliases
         assert found[next_step.id].kind == ItemKind.NEXT_STEP
         print(f"Hindsight retain_to_recall_seconds={delay:.2f}")
+
+        answer = memory.why(project, "Redis")
+        assert answer.text or answer.error
+        if answer.text:
+            assert answer.error is None
+            print(f"Hindsight why_sources={len(answer.sources)}")
+        else:
+            assert answer.error in {
+                "long-term memory timed out",
+                "long-term memory has no credits",
+                "long-term memory unavailable",
+            }
+            print(f"Hindsight why_error={answer.error}")
     finally:
         memory.close()

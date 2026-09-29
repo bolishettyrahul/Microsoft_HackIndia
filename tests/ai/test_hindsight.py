@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from concurrent.futures import TimeoutError as FutureTimeout
 from types import SimpleNamespace
 
-from baton.ai.hindsight import HindsightLongTermMemory
+from baton.ai.hindsight import HindsightLongTermMemory, UnavailableLongTermMemory
 from baton.interfaces.types import AlertCode, Item, ItemKind, new_id, utcnow
 
 
@@ -54,6 +55,28 @@ class _Client:
             "created_at": self.item.created_at.isoformat(),
         }
         return SimpleNamespace(results=[SimpleNamespace(metadata=metadata)])
+
+    async def areflect(self, **kwargs):
+        self.reflect_kwargs = kwargs
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        if self.status is not None:
+            error = RuntimeError("memory error")
+            error.status = self.status
+            raise error
+        return SimpleNamespace(
+            text="Redis was rejected because the project must stay on the free tier.",
+            based_on=SimpleNamespace(
+                memories=[
+                    SimpleNamespace(
+                        document_id="session:1",
+                        id="memory-1",
+                        text="Redis was rejected.",
+                    ),
+                    SimpleNamespace(document_id=None, id="memory-2", text="Use local cache."),
+                ]
+            ),
+        )
 
     async def aclose(self):
         return None
@@ -114,3 +137,55 @@ def test_snapshot_timeout_never_raises() -> None:
         assert snapshot.alerts[0].code == AlertCode.LTM_UNAVAILABLE
     finally:
         memory.close()
+
+
+def test_why_uses_grounded_reflect_and_returns_sources() -> None:
+    item = _item()
+    client = _Client(item)
+    memory = HindsightLongTermMemory("https://example.test", "key", client_factory=lambda: client)
+    try:
+        answer = memory.why(item.project, "Redis")
+
+        assert "free tier" in (answer.text or "")
+        assert answer.sources == ("session:1", "memory-2")
+        assert answer.error is None
+        assert client.reflect_kwargs["query"] == (
+            "Why did the team reject Redis? Cite the turn, model and person."
+        )
+        assert client.reflect_kwargs["budget"] == "low"
+        assert client.reflect_kwargs["tags_match"] == "any_strict"
+        assert client.reflect_kwargs["include_facts"] is True
+        assert client.reflect_kwargs["tags"] == [
+            "kind:rejection",
+            "kind:reversal",
+            "kind:decision",
+            "kind:constraint",
+        ]
+    finally:
+        memory.close()
+
+
+def test_why_turns_402_and_timeout_into_visible_errors() -> None:
+    item = _item()
+    client = _Client(item, status=402)
+    memory = HindsightLongTermMemory("https://example.test", "key", client_factory=lambda: client)
+    try:
+        assert memory.why(item.project, "Redis").error == "long-term memory has no credits"
+
+        original_submit = memory._service.submit
+
+        def timed_out(operation, timeout):
+            raise FutureTimeout
+
+        memory._service.submit = timed_out
+        assert memory.why(item.project, "Redis").error == "long-term memory timed out"
+        memory._service.submit = original_submit
+    finally:
+        memory.close()
+
+
+def test_unavailable_memory_why_is_visible() -> None:
+    answer = UnavailableLongTermMemory().why("Baton", "Redis")
+    assert answer.text is None
+    assert answer.sources == ()
+    assert answer.error == "long-term memory unavailable"

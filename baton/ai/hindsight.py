@@ -22,6 +22,7 @@ from baton.interfaces.types import (
     ItemKind,
     L2Snapshot,
     RecallTrace,
+    WhyAnswer,
     utcnow,
 )
 
@@ -394,6 +395,54 @@ class HindsightLongTermMemory:
         except Exception as error:
             return L2Snapshot(alerts=(_memory_alert(error),), fetched_at=utcnow())
 
+    async def _why(self, client: Any, project: str, approach: str) -> WhyAnswer:
+        bank = _bank_id(project)
+        if bank not in self._ensured:
+            await self._ensure(client, project)
+            with self._ensure_lock:
+                self._ensured.add(bank)
+        response = await client.areflect(
+            bank_id=bank,
+            query=f"Why did the team reject {approach}? Cite the turn, model and person.",
+            budget="low",
+            tags=[
+                "kind:rejection",
+                "kind:reversal",
+                "kind:decision",
+                "kind:constraint",
+            ],
+            tags_match="any_strict",
+            include_facts=True,
+        )
+        based_on = getattr(response, "based_on", None)
+        memories = getattr(based_on, "memories", None) or ()
+        sources: list[str] = []
+        for memory in memories:
+            source = (
+                getattr(memory, "document_id", None)
+                or getattr(memory, "id", None)
+                or getattr(memory, "text", None)
+            )
+            if source and source not in sources:
+                sources.append(str(source))
+        return WhyAnswer(
+            text=getattr(response, "text", None) or None,
+            sources=tuple(sources),
+        )
+
+    def why(self, project: str, approach: str) -> WhyAnswer:
+        try:
+            return self._service.submit(
+                lambda client: self._why(client, project, approach),
+                20.0,
+            )
+        except FutureTimeout:
+            return WhyAnswer(text=None, error="long-term memory timed out")
+        except Exception as error:
+            if _error_status(error) == 402:
+                return WhyAnswer(text=None, error="long-term memory has no credits")
+            return WhyAnswer(text=None, error="long-term memory unavailable")
+
     def close(self) -> None:
         self._service.close()
 
@@ -419,3 +468,6 @@ class UnavailableLongTermMemory:
 
     def snapshot(self, project: str, *, timeout: float = 5.0) -> L2Snapshot:
         return L2Snapshot(alerts=(self._alert,), fetched_at=utcnow())
+
+    def why(self, project: str, approach: str) -> WhyAnswer:
+        return WhyAnswer(text=None, error="long-term memory unavailable")
