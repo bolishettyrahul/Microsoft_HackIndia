@@ -1,10 +1,22 @@
-import type { ReactNode } from "react";
+import { lazy, Suspense, useMemo, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { motion, useReducedMotion, useScroll } from "motion/react";
 import { ArrowDown, ArrowRight, Ban, Check, Clock, X } from "lucide-react";
 import { Aurora, BatonMark, Wordmark } from "../components/brand";
 import { cx } from "../components/ui";
 import { CopyButton } from "../app/Chat";
+import { LoopSection } from "./LoopSection";
+
+const HeroScene = lazy(() => import("./HeroScene"));
+
+function hasWebGL() {
+  try {
+    const c = document.createElement("canvas");
+    return !!(c.getContext("webgl2") || c.getContext("webgl"));
+  } catch {
+    return false;
+  }
+}
 
 const A = { name: "gpt-oss-120b", color: "var(--color-lane-a)", soft: "rgb(56 189 248 / 0.12)" };
 const B = { name: "Gemini 3.5 Flash", color: "var(--color-lane-b)", soft: "rgb(167 139 250 / 0.12)" };
@@ -37,6 +49,7 @@ export function Landing() {
       <Nav />
       <main>
         <Hero />
+        <LoopSection />
         <Chapter n="01" kicker="The plan" title={<>Ten minutes <i>in.</i></>}
           body="You're planning a feature with one model. It suggests Redis. You say no: you're on a free tier, and you'd like answers without bullet lists. Baton writes that down as it happens, typed and attributed."
           visual={<PlanMock />} />
@@ -71,6 +84,7 @@ function Nav() {
       <nav className="glass flex w-full max-w-5xl items-center gap-4 rounded-full py-2 pl-5 pr-2">
         <Link to="/" aria-label="Baton home"><Wordmark /></Link>
         <div className="ml-auto hidden items-center gap-6 text-[13px] text-muted sm:flex">
+          <a href="#loop" className="hover:text-fg">The loop</a>
           <a href="#story" className="hover:text-fg">The story</a>
           <a href="#verified" className="hover:text-fg">Verification</a>
           <a href="#portable" className="hover:text-fg">Copy baton</a>
@@ -106,10 +120,24 @@ function Hero() {
           See the story <ArrowDown size={16} />
         </a>
       </motion.div>
-      <motion.div {...rise} transition={{ ...rise.transition, delay: 0.35 }} className="mt-16 w-full max-w-3xl">
-        <RelayTrack />
+      <motion.div {...rise} transition={{ ...rise.transition, delay: 0.35 }} className="mt-6 w-full max-w-6xl">
+        <Stage />
       </motion.div>
     </section>
+  );
+}
+
+/** The 3D handoff scene; the 2D relay track while it loads, or when WebGL is missing. */
+function Stage() {
+  const reduce = useReducedMotion();
+  const webgl = useMemo(hasWebGL, []);
+  if (!webgl) return <div className="mx-auto max-w-3xl"><RelayTrack /></div>;
+  return (
+    <div className="relative h-[clamp(300px,50vh,520px)] w-full">
+      <Suspense fallback={<div className="mx-auto max-w-3xl pt-16"><RelayTrack /></div>}>
+        <HeroScene still={!!reduce} />
+      </Suspense>
+    </div>
   );
 }
 
