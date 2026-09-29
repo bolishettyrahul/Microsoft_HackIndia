@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+import pytest
 
 from baton.backend.app import create_app
 from baton.backend.facade import Baton
@@ -153,3 +154,46 @@ def test_rerun_keeps_continuity_check_for_models_first_turn():
         chip for chip in rerun["reply"]["chips"] if chip["check_id"] == "continuity"
     )
     assert continuity["passed"] is False
+
+
+@pytest.mark.parametrize("reason,expected", [
+    ("auth", "disabled"), ("error", "cooling"), ("bad_request", "ready"),
+])
+@pytest.mark.parametrize("during_repair", [False, True])
+def test_provider_failure_policy_applies_to_initial_and_repair_calls(reason, expected, during_repair):
+    error = ModelUnavailable("groq:model-a", reason, "contact dev@example.com")
+    replies = ("- Invalid bullet", error) if during_repair else (error,)
+    model = FakeModel("groq:model-a", *replies)
+    client, _ai = client_for([model, FakeModel("gemini:model-b", "Fallback prose")])
+    sid = client.post("/api/sessions", json={"project": "demo", "user": "Dev"}).json()["session_id"]
+    client.patch(f"/api/sessions/{sid}", json={"prefs": {"no_bullets": True}})
+    response = client.post(f"/api/sessions/{sid}/turns", json={"text": "Continue"})
+    assert response.status_code == 200
+    body = response.json()
+    status = next(s for s in client.get(f"/api/sessions/{sid}/models").json()
+                  if s["model_id"] == model.profile.id)
+    assert status["state"] == expected
+    assert "dev@example.com" not in response.text
+    assert "dev@example.com" not in str(status)
+    unavailable = next(a for a in body["alerts"] if a["code"] == "model_unavailable")
+    assert unavailable["level"] == ("red" if reason == "auth" else "amber")
+    if during_repair:
+        assert body["reply"]["text"] == "- Invalid bullet"
+        assert any(a["code"] == "repair_skipped" for a in body["alerts"])
+
+
+def test_restart_restores_repaired_and_rerun_attempts_and_handoffs():
+    first = FakeModel("groq:model-a", RateLimited("groq:model-a", 30))
+    second = FakeModel("gemini:model-b", "- Bullet", "Prose repair", "Rerun prose", "Next turn")
+    client, ai = client_for([first, second])
+    sid = client.post("/api/sessions", json={"project": "demo", "user": "Dev"}).json()["session_id"]
+    client.patch(f"/api/sessions/{sid}", json={"prefs": {"no_bullets": True}})
+    client.post(f"/api/sessions/{sid}/turns", json={"text": "Continue"})
+    original = client.post(f"/api/sessions/{sid}/rerun").json()
+    restored = Baton(Settings(ai="fake"), ai)
+    assert restored.turns(sid)[0].model_dump(mode="json") == original
+    restored.send(sid, "Next")
+    turns = Baton(Settings(ai="fake"), ai).turns(sid)
+    assert len(turns) == 2
+    assert not turns[0].can_rerun
+    assert turns[1].can_rerun

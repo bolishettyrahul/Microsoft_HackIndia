@@ -13,6 +13,8 @@ from uuid import uuid4
 from baton.interfaces.ai import MessageRecord, SessionRecord
 from baton.interfaces.types import (
     CheckId,
+    BridgeActivity,
+    BridgeEvent,
     CheckResult,
     HandoffEvent,
     Item,
@@ -94,6 +96,26 @@ CREATE TABLE IF NOT EXISTS recalls (
 );
 CREATE INDEX IF NOT EXISTS idx_recalls_session_turn
     ON recalls(session_id, turn, id);
+CREATE INDEX IF NOT EXISTS idx_items_project ON contract_items(project, created_at);
+CREATE TABLE IF NOT EXISTS bridge_sessions (
+    project TEXT NOT NULL,
+    app TEXT NOT NULL,
+    session_id TEXT NOT NULL REFERENCES sessions(id),
+    last_turn INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(project, app),
+    UNIQUE(session_id)
+);
+CREATE TABLE IF NOT EXISTS bridge_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project TEXT NOT NULL,
+    at TEXT NOT NULL,
+    app TEXT NOT NULL,
+    action TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    items INTEGER NOT NULL,
+    passed INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_bridge_events_project_at ON bridge_events(project, at);
 """
 
 
@@ -393,6 +415,75 @@ class SQLiteStore:
             (session_id,),
         ).fetchall()
         return [self._item(row) for row in rows]
+
+    def project_items(self, project: str) -> list[Item]:
+        rows = self._connection().execute(
+            "SELECT * FROM contract_items WHERE project=? ORDER BY created_at, turn, id", (project,)
+        ).fetchall()
+        return [self._item(row) for row in rows]
+
+    def bridge_session(self, project: str, app: str) -> SessionRecord:
+        if app not in ("chatgpt", "claude"):
+            raise ValueError("Unknown bridge app")
+        connection = self._connection()
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            row = connection.execute(
+                "SELECT session_id FROM bridge_sessions WHERE project=? AND app=?", (project, app)
+            ).fetchone()
+            if row:
+                record = self.get_session(row["session_id"])
+            else:
+                user = "ChatGPT" if app == "chatgpt" else "Claude"
+                existing = connection.execute(
+                    "SELECT * FROM sessions WHERE project=? AND user=? ORDER BY created_at, id LIMIT 1",
+                    (project, user),
+                ).fetchone()
+                record = self._session(existing) if existing else self.create_session(project, user, True)
+                last_turn = max(self.next_turn(record.id) - 1,
+                                max((i.turn for i in self.items(record.id)), default=0))
+                connection.execute("INSERT INTO bridge_sessions VALUES (?, ?, ?, ?)",
+                                   (project, app, record.id, last_turn))
+            connection.execute("COMMIT")
+            return record
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
+
+    def reserve_bridge_turn(self, session_id: str) -> int:
+        row = self._connection().execute(
+            "UPDATE bridge_sessions SET last_turn=last_turn+1 WHERE session_id=? RETURNING last_turn",
+            (session_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(session_id)
+        return int(row["last_turn"])
+
+    def log_bridge_event(self, event: BridgeEvent) -> None:
+        self._connection().execute(
+            "INSERT INTO bridge_events(project, at, app, action, summary, items, passed) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (event.project, event.at.isoformat(), event.app, event.action, event.summary,
+             event.items, None if event.passed is None else int(event.passed)),
+        )
+
+    def bridge_events(self, project: str, limit: int = 50) -> list[BridgeEvent]:
+        rows = self._connection().execute(
+            "SELECT * FROM bridge_events WHERE project=? ORDER BY at DESC, id DESC LIMIT ?",
+            (project, max(0, limit)),
+        ).fetchall()
+        return [BridgeEvent(at=_dt(row["at"]), project=row["project"], app=row["app"],
+                            action=row["action"], summary=row["summary"], items=row["items"],
+                            passed=None if row["passed"] is None else bool(row["passed"])) for row in rows]
+
+    def bridge_activity(self, project: str) -> list[BridgeActivity]:
+        rows = self._connection().execute(
+            """SELECT app, MAX(at) AS last_seen,
+               SUM(action='pull') AS pulls, SUM(action IN ('record', 'import')) AS records,
+               SUM(action='check') AS checks FROM bridge_events
+               WHERE project=? AND app IN ('chatgpt', 'claude') GROUP BY app""", (project,)
+        ).fetchall()
+        return [BridgeActivity(app=row["app"], last_seen=_dt(row["last_seen"]),
+                               pulls=row["pulls"], records=row["records"], checks=row["checks"]) for row in rows]
 
     def log_handoff(self, session_id: str, turn: int, event: HandoffEvent) -> None:
         self.get_session(session_id)

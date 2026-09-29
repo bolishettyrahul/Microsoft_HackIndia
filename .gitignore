@@ -20,3 +20,5 @@ baton.db-*
 .claude/settings.local.json
 .playwright-mcp/
 
+article_*.md
+article.md

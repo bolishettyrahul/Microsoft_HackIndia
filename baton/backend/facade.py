@@ -6,6 +6,7 @@ from collections import defaultdict
 from threading import RLock
 
 from baton.backend.contract import combine, ledger, line, render
+from baton.backend.bridge import Bridge
 from baton.backend.redact import redact
 from baton.backend.turn import TurnRunner, _chip, rerun_last_turn, run_turn
 from baton.config import Settings
@@ -19,7 +20,7 @@ from baton.interfaces.api import (
     TraceView,
     TurnView,
 )
-from baton.interfaces.types import HandoffEvent, Item, ItemKind, L2Snapshot, new_id, utcnow
+from baton.interfaces.types import CheckId, HandoffEvent, Item, ItemKind, L2Snapshot, new_id, utcnow
 
 
 class Baton:
@@ -28,6 +29,7 @@ class Baton:
     def __init__(self, settings: Settings, ai: AIServices) -> None:
         self.settings = settings
         self.ai = ai
+        self.bridge = Bridge(ai, settings)
         self._snapshots: dict[str, L2Snapshot] = {}
         self._turns: dict[str, list[TurnView]] = defaultdict(list)
         self._locks: dict[str, RLock] = defaultdict(RLock)
@@ -103,6 +105,9 @@ class Baton:
 
             def reply(record) -> ReplyView:
                 results = self.ai.store.verifications(record.id) if record.id is not None else ()
+                # Stores need not preserve insertion order; keep live and restored
+                # check chips in the same order as the verifier.
+                results = sorted(results, key=lambda result: tuple(CheckId).index(result.check_id))
                 return ReplyView(
                     message_id=record.id or 0,
                     model_id=record.model or "unknown",

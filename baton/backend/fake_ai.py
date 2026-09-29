@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
+from threading import RLock
 
 from baton.interfaces.ai import (
     AIServices,
@@ -13,7 +14,7 @@ from baton.interfaces.ai import (
     ModelStatus,
     SessionRecord,
 )
-from baton.interfaces.types import ExtractResult, L2Snapshot, utcnow
+from baton.interfaces.types import BridgeActivity, ExtractResult, L2Snapshot, utcnow
 
 
 class FakeModel:
@@ -145,6 +146,10 @@ class FakeStore:
         self.handoff_values = defaultdict(list)
         self.recall_values = defaultdict(list)
         self._message_id = 0
+        self._bridge_sessions = {}
+        self._bridge_turns = defaultdict(int)
+        self._bridge_events = []
+        self._bridge_lock = RLock()
 
     def create_session(self, project, user, memory_on):
         sid = f"session-{len(self.sessions) + 1}"
@@ -217,6 +222,53 @@ class FakeStore:
     def items(self, session_id):
         self.get_session(session_id)
         return list(self.item_values[session_id])
+
+    def project_items(self, project):
+        return sorted((item for values in self.item_values.values() for item in values
+                       if item.project == project), key=lambda i: (i.created_at, i.turn, i.id))
+
+    def bridge_session(self, project, app):
+        if app not in ("chatgpt", "claude"):
+            raise ValueError("Unknown bridge app")
+        with self._bridge_lock:
+            key = (project, app)
+            if key not in self._bridge_sessions:
+                user = "ChatGPT" if app == "chatgpt" else "Claude"
+                record = next((s for s in self.sessions.values() if s.project == project and s.user == user), None)
+                record = record or self.create_session(project, user, True)
+                self._bridge_sessions[key] = record.id
+                self._bridge_turns[record.id] = max(self.next_turn(record.id) - 1,
+                                                   max((i.turn for i in self.items(record.id)), default=0))
+            return self.get_session(self._bridge_sessions[key])
+
+    def reserve_bridge_turn(self, session_id):
+        with self._bridge_lock:
+            if session_id not in self._bridge_sessions.values():
+                raise KeyError(session_id)
+            self._bridge_turns[session_id] += 1
+            return self._bridge_turns[session_id]
+
+    def log_bridge_event(self, event):
+        with self._bridge_lock:
+            self._bridge_events.append(event)
+
+    def bridge_events(self, project, limit=50):
+        with self._bridge_lock:
+            events = [e for e in reversed(self._bridge_events) if e.project == project]
+            return sorted(events, key=lambda e: e.at, reverse=True)[:max(0, limit)]
+
+    def bridge_activity(self, project):
+        with self._bridge_lock:
+            result = []
+            for app in ("chatgpt", "claude"):
+                events = [e for e in self._bridge_events if e.project == project and e.app == app]
+                result.append(BridgeActivity(
+                    app=app, last_seen=max((e.at for e in events), default=None),
+                    pulls=sum(e.action == "pull" for e in events),
+                    records=sum(e.action in ("record", "import") for e in events),
+                    checks=sum(e.action == "check" for e in events),
+                ))
+            return result
 
     def log_handoff(self, session_id, turn, event):
         self.handoff_values[session_id].append((turn, event))
