@@ -18,3 +18,5 @@ baton.db-*
 # Sector worktrees (ai, backend, frontend) live inside the repo folder
 .claude/worktrees/
 .claude/settings.local.json
+.playwright-mcp/
+

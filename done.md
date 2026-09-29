@@ -1,37 +1,53 @@
 # Baton: progress so far
 
-Last updated 2026-09-29, 23:22 IST. Submission is due at about 00:15 IST on 2026-09-30.
+Last updated 2026-09-29, 23:25 IST. Submission is due at about 00:15 IST on 2026-09-30.
 
 ## Decisions
 
 | Decision | Choice |
 | --- | --- |
 | How the work is split | Three sectors: **AI**, **backend**, **frontend**, with one handoff contract per boundary |
-| UI stack | **React** (Vite + Tailwind) for the frontend, talking to a **FastAPI** backend over HTTP (`/api`) |
+| UI stack | **React 19** (Vite + Tailwind v4) for the frontend, talking to a **FastAPI** backend over HTTP (`/api`) |
 | Who builds | Three background agents, one per sector worktree; integration happens on `main` |
 | Process | Deadline mode: contracts first, then a parallel build. The specs' full gate process is suspended. |
 | Worktree setup | Each worktree gets a sector brief (the root `CLAUDE.md`), file fences (`.claude/settings.local.json` deny rules) and its own environment (`.venv`, `.env`) |
 
 ## Done
 
-1. **Specs regrouped into three sectors.** The design spec and the sectors doc now describe AI, backend and frontend (commit `b2121ec`, now on `main`).
+1. **Specs regrouped into three sectors.** The design spec and the sectors doc now describe AI, backend and frontend (commit `b2121ec`, on `main`).
 2. **Contracts written on `main`:**
-   - `baton/interfaces/types.py` holds the shared types: items, preferences, alerts, handoff events, recall traces and extractor output.
-   - `baton/interfaces/errors.py` holds `RateLimited` and `ModelUnavailable`, the only errors that cross from AI to backend.
-   - `baton/interfaces/ai.py` is the **AI → backend** contract: `ChatModel`, `ModelChain`, `Extractor`, `Store` (SQLite L1), `LongTermMemory` (Hindsight L2), and the `AIServices` bundle.
+   - `baton/interfaces/types.py` holds shared types: items, preferences, alerts, handoff events, recall traces and extractor output.
+   - `baton/interfaces/errors.py` holds `RateLimited` and `ModelUnavailable`, the only errors crossing AI to backend.
+   - `baton/interfaces/ai.py` is the **AI → backend** contract: `ChatModel`, `ModelChain`, `Extractor`, `Store` (SQLite L1), `LongTermMemory` (Hindsight L2), and `AIServices`.
    - `baton/interfaces/api.py` is the **backend → frontend** contract: 17 HTTP endpoints and their JSON views. `web/src/api/contract.ts` mirrors it in TypeScript.
    - `baton/config.py` reads settings from `.env`.
    - Project files: `requirements.txt`, `.env.example`, `pyproject.toml` and `.gitignore`.
    - The root `CLAUDE.md` maps each branch to its sector, lists the files each sector owns, and sets the cut-down scope.
-3. **Worktrees & Branches:** `frontend` worktree exists at `.claude/worktrees/frontend` (fast-forwarded to `main`). Branches `worktree-ai`, `worktree-backend`, `worktree-frontend` (and convenience aliases `ai`, `backend`, `frontend`) have been created at `18f126f` and pushed to remote `origin`.
-4. **AI sector implemented and pushed:** commit `c9956d3` is on the remote `ai` branch.
-   - `baton/ai/provider.py` implements the OpenAI-compatible Groq and Gemini adapter, disables SDK retries, strips reasoning blocks, and maps provider failures to `RateLimited` or `ModelUnavailable`.
-   - `baton/ai/chain.py` implements sticky per-session model selection, session-only benching, global cooldowns and disables, status reporting, and the Groq-only rate-limit burst.
-   - `baton/ai/extractor.py` implements strict structured extraction, one validation retry, provider fallback, alias normalization, and visible extraction-failure alerts.
-   - `baton/ai/store.py` implements the thread-safe SQLite L1 store with one connection per thread, WAL mode, sessions, messages, final attempts, checks, items, handoffs, and recall traces.
-   - `baton/ai/hindsight.py` implements the dedicated Hindsight event-loop thread, bank setup and directives, fire-and-forget retain, parallel state/ledger recall, metadata-based item reconstruction, timeouts, and no-credit alerts.
-   - `baton/ai/build.py` exposes `build_ai(settings) -> AIServices` and creates visible disabled/L1-only states when keys are absent.
-5. **AI offline verification passed:** `13 passed` under `tests/ai`, `compileall` succeeds, `pip check` reports no broken dependencies, and `git diff --check` is clean. The tests cover provider request shaping and reasoning removal; chain order, cooldown expiry, benching and burst; extractor schema/retry/failure; SQLite round trips and cross-thread access; Hindsight retain/recall, 402 and timeout behavior; and offline service construction.
+3. **Worktrees & Branches:** Branches `worktree-ai`, `worktree-backend`, `worktree-frontend` (and aliases `ai`, `backend`, `frontend`) created, tracked, and synchronized.
+4. **AI sector implemented and pushed (`ai` branch, commit `c9956d3` / `902af55`):**
+   - `baton/ai/provider.py`: OpenAI-compatible Groq and Gemini adapter, SDK retries disabled, reasoning blocks stripped, provider errors mapped to `RateLimited` / `ModelUnavailable`.
+   - `baton/ai/chain.py`: Sticky per-session model selection, session-only benching, global cooldowns, status reporting, and Groq-only rate-limit burst.
+   - `baton/ai/extractor.py`: Strict structured extraction, validation retry, provider fallback, alias normalization, and visible extraction-failure alerts.
+   - `baton/ai/store.py`: Thread-safe SQLite L1 store with per-thread connections, WAL mode, sessions, messages, final attempts, checks, items, handoffs, and recall traces.
+   - `baton/ai/hindsight.py`: Dedicated Hindsight event-loop thread, bank setup/directives, fire-and-forget retain, parallel recall, metadata item reconstruction, timeouts, and no-credit alerts.
+   - `baton/ai/build.py`: Exposes `build_ai(settings) -> AIServices` with fallback L1-only states when keys are absent.
+   - **Verification:** 13 unit tests passed (`pytest tests/ai`), clean `compileall` and `pip check`.
+5. **Backend sector implemented and pushed (`backend` branch, commit `37cab26` / `ad4d4eb`):**
+   - `baton/backend/contract.py`: Merges L1 and L2 items, applies supersession/caps, resolves reversal targets, validates rejection aliases, renders `<baton_contract>`, and builds rejection ledger.
+   - `baton/backend/redact.py`: Redacts Groq, OpenAI/Anthropic, Google, GitHub, AWS, and JWT credentials, `.env` secrets, and emails.
+   - `baton/backend/verifier.py`: Deterministic `rejected`, `continuity`, and `no_bullets` checks with negation awareness and code-fence ignoring.
+   - `baton/backend/compose.py`: Builds memory-ON/OFF prompts, repair rules, and strips leaked `<think>` tags.
+   - `baton/backend/turn.py`: Turn loop orchestration: model candidate selection, 429/unavailable handoff, sticky active model, repair retry, extraction/retain triggers, and memory-flipped turn re-runs.
+   - `baton/backend/facade.py` & `baton/backend/app.py`: Implements backend facade and exposes all 17 API endpoints under `/api`.
+   - `baton/backend/wiring.py`: Single integration point for `build_ai`.
+   - **Verification:** 7 tests passed against deterministic fake AI (`pytest tests/backend`).
+6. **Frontend sector implemented and pushed (`worktree-frontend` / `frontend`, commits `03bed65` through `e3b4a69`):**
+   - **Stack & Architecture:** React 19, Vite, Tailwind CSS v4, TypeScript in `web/`.
+   - **Design System ("Night Relay"):** Solid graphite surfaces, lane colors per model, baton gradient, self-hosted typography (Instrument Serif, Inter, JetBrains Mono), and reduced-motion support.
+   - **API & Mock:** Fully typed HTTP client for all 17 endpoints (`web/src/api/http.ts`) and full-featured in-browser demo mock (`web/src/api/mock.ts`) with `npm run dev` (mock) and `npm run dev:live` (proxy to FastAPI on `:8000`).
+   - **Landing Page (`/`):** Story scroll experience covering the 429 wall, Baton handoff, before/after comparison table, code check repair ladder, interactive 3D WebGL handoff hero (`react-three-fiber` scene with glowing spheres and baton particle trajectory), and a sticky scroll-driven 7-step turn-loop ring.
+   - **Dashboard App (`/app`):** Slim top-bar relay showing model chain pills (active model with baton, cooling models with countdowns, click to switch), Memory toggle, Controls dropdown (Exhaust rate limit burst, Switch model, Refresh memory, No-bullets check), chat view with lane tags and check chips, and a right-hand Baton inspector panel (Goal, Next step, Rejected items, and Copy baton).
+   - **Tests:** Vitest test suite (`web/src/__tests__/api.test.ts`) passing for mock states, request shapes, and lane rendering.
 
 ## Scope for the submission
 
@@ -48,37 +64,33 @@ Last updated 2026-09-29, 23:22 IST. Submission is due at about 00:15 IST on 2026
 
 **Out:** the patch statistics and learning chart, seeding, the team view, "Why?", Ollama, and the full conformance suites.
 
-## Tests remaining
+## Tests remaining & Integration checklist
 
-### AI live tests (blocked until the three `.env` keys contain values)
-
+### AI live tests (requires API keys in `.env`)
 - [ ] Groq smoke calls for `openai/gpt-oss-120b`, `openai/gpt-oss-20b`, and `qwen/qwen3.8-27b`.
 - [ ] Gemini smoke calls for `gemini-3.5-flash` and `gemini-3.5-flash-lite`, including strict structured output.
 - [ ] Verify real 429 parsing and `retry-after` behavior for Groq and Gemini.
-- [ ] Run the Groq burst once and confirm the model enters cooldown without exhausting the demo-day quota.
-- [ ] Create/ensure the Hindsight project bank, retain one typed turn, and recall it with tags and metadata intact.
-- [ ] Confirm the real Hindsight client works on the dedicated event-loop thread and that a failed/slow recall returns the visible L1-only alert.
+- [ ] Run the Groq burst once and confirm the model enters cooldown without exhausting quota.
+- [ ] Create/ensure Hindsight bank, retain one typed turn, and recall with tags and metadata intact.
+- [ ] Verify dedicated event-loop thread handling for Hindsight with visible L1 fallback on timeout.
 
 ### Cross-sector integration tests
-
-- [ ] Merge AI, backend and frontend branches into `main`, resolving only integration issues.
-- [ ] Run the complete offline `pytest` suite after the merge.
-- [ ] Exercise `build_ai` through the real FastAPI backend: normal chat, manual handoff, 429 handoff, sticky target model, and no-model fallback.
-- [ ] Verify memory OFF starts fresh; memory ON injects the contract; re-running with memory flipped replaces the turn's final reply and extracted items.
-- [ ] Verify extraction -> SQLite -> Hindsight retain -> handoff recall -> contract injection end to end.
-- [ ] Verify rejected, continuity and no-bullets checks plus the single repair retry through the real model chain.
-- [ ] Verify missing/bad keys, Hindsight timeout/no credits, extraction failure, and provider auth/bad-request failures are visible in the API and UI.
-- [ ] Run the React production build and rehearse the full demo path with Copy baton, Ledger and Memory trace.
+- [ ] Merge AI, backend and frontend branches into `main`.
+- [ ] Run complete test suite (`pytest tests/ai tests/backend` + `npm test` in `web/`).
+- [ ] Run FastAPI backend (`uvicorn baton.backend.app:app`) against real `AIServices` and verify live React UI (`npm run dev:live`).
+- [ ] Verify end-to-end memory toggle (OFF -> fresh, ON -> contract injection, flip turn -> regenerated reply & items).
+- [ ] Verify end-to-end extraction -> SQLite -> Hindsight retain -> handoff recall -> prompt injection.
+- [ ] Verify rejected/continuity/no_bullets checks and 1-repair retry behavior on real models.
+- [ ] Rehearse full demo path: Copy Baton, Ledger Reverse, Memory Trace, Burst Rate-Limit trigger.
 
 ## Next
 
-1. Fill the existing root `.env` with `GROQ_API_KEY`, `GEMINI_API_KEY` and `HINDSIGHT_API_KEY`; the variables currently exist but their values are empty.
-2. Run the six AI live-test groups above, using only minimal smoke calls until the final burst rehearsal.
-3. Finish and push the backend and frontend sectors.
-4. Merge all three sectors into `main`, run the cross-sector tests, and fix integration failures.
-5. Finish the README and submission content, rehearse the demo, record it, and submit.
+1. Merge `ai`, `backend`, and `frontend` branches into `main`.
+2. Populate `.env` with live keys (`GROQ_API_KEY`, `GEMINI_API_KEY`, `HINDSIGHT_API_KEY`) for live rehearsal.
+3. Run cross-sector integration and fix any wiring issues between backend and AI.
+4. Prepare README, record demo video, and submit before deadline (~00:15 IST).
 
 ## Needed from you
 
-- Pause OneDrive syncing. Otherwise it fights `node_modules`, `.venv` and SQLite.
-- Fill the existing root `.env` with `GROQ_API_KEY`, `GEMINI_API_KEY` and `HINDSIGHT_API_KEY`. Never commit it or paste the values into chat.
+- Pause OneDrive syncing if active. Otherwise it fights `node_modules`, `.venv` and SQLite.
+- Fill the root `.env` with `GROQ_API_KEY`, `GEMINI_API_KEY` and `HINDSIGHT_API_KEY`. Never commit it.
