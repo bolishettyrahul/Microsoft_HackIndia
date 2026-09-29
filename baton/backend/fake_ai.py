@@ -14,7 +14,15 @@ from baton.interfaces.ai import (
     ModelStatus,
     SessionRecord,
 )
-from baton.interfaces.types import BridgeActivity, ExtractResult, L2Snapshot, utcnow
+from baton.interfaces.types import (
+    BridgeActivity,
+    CheckId,
+    ExtractResult,
+    L2Snapshot,
+    PatchStat,
+    WhyAnswer,
+    utcnow,
+)
 
 
 class FakeModel:
@@ -150,6 +158,7 @@ class FakeStore:
         self._bridge_turns = defaultdict(int)
         self._bridge_events = []
         self._bridge_lock = RLock()
+        self._patch_stats = defaultdict(lambda: [0, 0])
 
     def create_session(self, project, user, memory_on):
         sid = f"session-{len(self.sessions) + 1}"
@@ -270,6 +279,63 @@ class FakeStore:
                 ))
             return result
 
+    def record_check(self, model, check_id, level, passed):
+        if level not in range(4):
+            raise ValueError("patch level must be between 0 and 3")
+        key = (model, CheckId(check_id), level)
+        with self._bridge_lock:
+            self._patch_stats[key][0] += int(passed)
+            self._patch_stats[key][1] += 1
+
+    def patch_stats(self, model=None):
+        with self._bridge_lock:
+            return [
+                PatchStat(
+                    model=stat_model,
+                    check_id=check_id,
+                    level=level,
+                    passes=values[0],
+                    trials=values[1],
+                )
+                for (stat_model, check_id, level), values in sorted(
+                    self._patch_stats.items(),
+                    key=lambda value: (value[0][0], value[0][1].value, value[0][2]),
+                )
+                if model is None or stat_model == model
+            ]
+
+    def first_attempt_rates(self, project):
+        groups = {}
+        for session_id, session in self.sessions.items():
+            if session.project != project:
+                continue
+            for message in self.msgs[session_id]:
+                if (
+                    message.attempt != "first"
+                    or not message.memory_on
+                    or message.model is None
+                    or message.id is None
+                ):
+                    continue
+                results = [
+                    result for result in self.checks[message.id]
+                    if result.status != "n/a"
+                ]
+                if not results:
+                    continue
+                key = (message.model, session_id)
+                if key not in groups:
+                    groups[key] = [message.created_at, 0, 0]
+                groups[key][0] = min(groups[key][0], message.created_at)
+                groups[key][1] += len(results)
+                groups[key][2] += sum(result.status == "fail" for result in results)
+        return [
+            (model, session_id, values[0], values[1], values[2])
+            for (model, session_id), values in sorted(
+                groups.items(), key=lambda value: (value[1][0], value[0][0], value[0][1])
+            )
+        ]
+
     def log_handoff(self, session_id, turn, event):
         self.handoff_values[session_id].append((turn, event))
 
@@ -286,8 +352,10 @@ class FakeStore:
 
 
 class FakeMemory:
-    def __init__(self, snapshot=None) -> None:
+    def __init__(self, snapshot=None, why_answer=None) -> None:
         self.value = snapshot or L2Snapshot(fetched_at=utcnow())
+        self.why_answer = why_answer
+        self.why_calls = []
         self.retained = []
 
     def ensure_bank(self, project):
@@ -298,6 +366,15 @@ class FakeMemory:
 
     def snapshot(self, project, *, timeout=5.0):
         return self.value
+
+    def why(self, project, approach):
+        self.why_calls.append((project, approach))
+        if self.why_answer is not None:
+            return self.why_answer
+        return WhyAnswer(
+            text=f"{approach} was rejected according to the recorded project ledger.",
+            sources=("fake-memory",),
+        )
 
 
 def services(models, *extracts):

@@ -3,8 +3,8 @@
 // the next model restarts and re-suggests Redis (red chips); a re-run with memory ON continues
 // (green chips); asking for "steps" triggers a bullet reply that is repaired.
 import type {
-  Alert, BurstView, ChipView, ContractLine, ContractView, HandoffEvent, LedgerRow, ModelStatus,
-  RecallTrace, ReplyView, SessionView, TraceView, TurnView,
+  Alert, BurstView, ChipView, ContractLine, ContractView, HandoffEvent, LearningView,
+  LedgerRow, ModelStatus, RecallTrace, ReplyView, SessionView, TraceView, TurnView, WhyView,
 } from "./contract";
 import { ApiError, type BatonApi } from "./http";
 
@@ -432,6 +432,63 @@ export function createMockApi(opts: { latencyMs?: number; extractionDelayMs?: nu
         r.item_id === item_id ? { ...r, status: "reversed", reversal_reason: reason ?? "Reversed by the user" } : r,
       );
       return s.ledger;
+    },
+    async why(sid, { item_id }) {
+      const s = get(sid);
+      const row = s.ledger.find((value) => value.item_id === item_id);
+      if (!row) throw new ApiError(404, `unknown item ${item_id}`);
+      await sleep(latency / 2);
+      return {
+        item_id,
+        approach: row.approach,
+        answer: row.reason
+          ? `${row.approach} was rejected because ${row.reason}.`
+          : `${row.approach} was rejected in the recorded project ledger.`,
+        sources: [`item:${row.item_id}`, `turn:${row.turn}`],
+        error: null,
+      } satisfies WhyView;
+    },
+    async learning(project) {
+      const pointGroups = new Map<string, LearningView["points"][number]>();
+      const statGroups = new Map<string, LearningView["stats"][number]>();
+      for (const s of sessions.values()) {
+        if (s.view.project !== project) continue;
+        for (const turn of s.turns) {
+          const attempts = [...turn.earlier_attempts, ...(turn.reply ? [turn.reply] : [])];
+          for (const attempt of attempts) {
+            if (attempt.attempt !== "first" || !attempt.memory_on) continue;
+            const pointKey = `${attempt.model_id}:${s.view.session_id}`;
+            const point = pointGroups.get(pointKey) ?? {
+              model: attempt.model_id,
+              session_id: s.view.session_id,
+              at: s.view.created_at,
+              checks: 0,
+              failures: 0,
+            };
+            point.checks += attempt.chips.length;
+            point.failures += attempt.chips.filter((value) => !value.passed).length;
+            pointGroups.set(pointKey, point);
+            for (const result of attempt.chips) {
+              const statKey = `${attempt.model_id}:${result.check_id}:1`;
+              const stat = statGroups.get(statKey) ?? {
+                model: attempt.model_id,
+                check_id: result.check_id,
+                level: 1,
+                passes: 0,
+                trials: 0,
+              };
+              stat.passes += Number(result.passed);
+              stat.trials += 1;
+              statGroups.set(statKey, stat);
+            }
+          }
+        }
+      }
+      return {
+        stats: [...statGroups.values()],
+        points: [...pointGroups.values()],
+        alerts: [],
+      } satisfies LearningView;
     },
     async trace(sid) {
       const s = get(sid);

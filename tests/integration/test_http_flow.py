@@ -107,12 +107,13 @@ def test_complete_http_flow_uses_real_ai_classes_and_sqlite(tmp_path):
             json={"prefs": {"no_bullets": True, "free_text": []}},
         ).status_code == 200
 
+        rejection = Item(
+            id=new_id(), kind=ItemKind.REJECTION, text="Redis", reason="free tier",
+            aliases=("redis cache",), session_id=sid, project="demo", user="Integrator",
+            turn=0, created_at=utcnow(),
+        )
         store.add_items((
-            Item(
-                id=new_id(), kind=ItemKind.REJECTION, text="Redis", reason="free tier",
-                aliases=("redis cache",), session_id=sid, project="demo", user="Integrator",
-                turn=0, created_at=utcnow(),
-            ),
+            rejection,
             Item(
                 id=new_id(), kind=ItemKind.NEXT_STEP, text="Add an in-process TTL cache",
                 session_id=sid, project="demo", user="Integrator", turn=0, created_at=utcnow(),
@@ -151,6 +152,25 @@ def test_complete_http_flow_uses_real_ai_classes_and_sqlite(tmp_path):
         assert contract.status_code == 200
         ledger = client.get(f"/api/sessions/{sid}/ledger").json()
         assert ledger[0]["status"] == "active"
+        why = client.post(
+            f"/api/sessions/{sid}/ledger/why",
+            json={"item_id": rejection.id},
+        )
+        assert why.status_code == 200
+        assert why.json()["approach"] == "Redis"
+        assert why.json()["error"] == "long-term memory unavailable"
+
+        store.record_check("gemini:model-b", CheckId.REJECTED, 1, True)
+        learning = client.get("/api/projects/demo/learning")
+        assert learning.status_code == 200
+        assert learning.json()["stats"] == [{
+            "model": "gemini:model-b",
+            "check_id": "rejected",
+            "level": 1,
+            "passes": 1,
+            "trials": 1,
+        }]
+        assert learning.json()["points"]
         assert client.post(
             f"/api/sessions/{sid}/ledger/reverse",
             json={"item_id": ledger[0]["item_id"], "reason": "changed"},

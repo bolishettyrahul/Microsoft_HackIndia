@@ -5,16 +5,18 @@ from baton.backend.app import create_app
 from baton.backend.facade import Baton
 from baton.backend.wiring import build_baton
 from baton.config import Settings
-from baton.interfaces.ai import ModelState
+from baton.interfaces.ai import MessageRecord, ModelState
 from baton.interfaces.errors import ModelUnavailable, RateLimited
 from baton.interfaces.types import (
     CheckId,
+    CheckResult,
     ExtractedItem,
     ExtractResult,
     Item,
     ItemKind,
     new_id,
     utcnow,
+    WhyAnswer,
 )
 from .fakes import FakeModel, services
 
@@ -92,6 +94,107 @@ def test_unknown_session_is_404():
     client, _ai = client_for([FakeModel("groq:model-a", "unused")])
     response = client.get("/api/sessions/missing")
     assert response.status_code == 404
+
+
+def test_learning_endpoint_returns_patch_stats_and_first_attempt_points():
+    client, ai = client_for([FakeModel("groq:model-a", "unused")])
+    session = ai.store.create_session("demo", "Dev", True)
+    created_at = utcnow()
+    message_id = ai.store.save_message(MessageRecord(
+        session_id=session.id,
+        turn=1,
+        role="assistant",
+        model="groq:model-a",
+        attempt="first",
+        memory_on=True,
+        is_final=True,
+        content="response",
+        created_at=created_at,
+    ))
+    ai.store.save_verifications(message_id, (
+        CheckResult(check_id=CheckId.REJECTED, status="pass"),
+        CheckResult(check_id=CheckId.NO_BULLETS, status="fail", evidence="bullet"),
+        CheckResult(check_id=CheckId.CODE_LANGUAGE, status="n/a"),
+    ))
+    ai.store.record_check("groq:model-a", CheckId.REJECTED, 1, True)
+    ai.store.record_check("groq:model-a", CheckId.REJECTED, 1, False)
+
+    response = client.get("/api/projects/demo/learning")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "stats": [{
+            "model": "groq:model-a",
+            "check_id": "rejected",
+            "level": 1,
+            "passes": 1,
+            "trials": 2,
+        }],
+        "points": [{
+            "model": "groq:model-a",
+            "session_id": session.id,
+            "at": created_at.isoformat().replace("+00:00", "Z"),
+            "checks": 2,
+            "failures": 1,
+        }],
+        "alerts": [],
+    }
+
+
+def test_why_endpoint_caches_until_ledger_changes_and_validates_item():
+    client, ai = client_for([FakeModel("groq:model-a", "unused")])
+    sid = client.post(
+        "/api/sessions", json={"project": "demo", "user": "Dev"}
+    ).json()["session_id"]
+    rejected = Item(
+        id=new_id(),
+        kind=ItemKind.REJECTION,
+        text="Redis",
+        reason="free tier",
+        session_id=sid,
+        project="demo",
+        user="Dev",
+        turn=1,
+        model="groq:model-a",
+        created_at=utcnow(),
+    )
+    ai.store.add_items((rejected,))
+    ai.memory.why_answer = WhyAnswer(
+        text="Redis was rejected because the project must stay on the free tier.",
+        sources=("session:1",),
+    )
+
+    first = client.post(
+        f"/api/sessions/{sid}/ledger/why", json={"item_id": rejected.id}
+    )
+    second = client.post(
+        f"/api/sessions/{sid}/ledger/why", json={"item_id": rejected.id}
+    )
+
+    assert first.status_code == 200
+    assert second.json() == first.json()
+    assert first.json() == {
+        "item_id": rejected.id,
+        "approach": "Redis",
+        "answer": "Redis was rejected because the project must stay on the free tier.",
+        "sources": ["session:1"],
+        "error": None,
+    }
+    assert ai.memory.why_calls == [("demo", "Redis")]
+
+    client.post(
+        f"/api/sessions/{sid}/ledger/reverse",
+        json={"item_id": rejected.id, "reason": "requirements changed"},
+    )
+    assert client.post(
+        f"/api/sessions/{sid}/ledger/why", json={"item_id": rejected.id}
+    ).status_code == 200
+    assert ai.memory.why_calls == [("demo", "Redis"), ("demo", "Redis")]
+
+    missing = client.post(
+        f"/api/sessions/{sid}/ledger/why", json={"item_id": "missing"}
+    )
+    assert missing.status_code == 404
 
 
 def test_wiring_honours_fake_mode_without_provider_keys():

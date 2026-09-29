@@ -1,7 +1,7 @@
 // Typed client for the backend -> frontend contract (see contract.ts). One function per endpoint.
 import type {
-  BurstView, ContractView, Health, LedgerRow, ModelStatus, ReverseRejection, SessionView,
-  StartSession, TraceView, TurnView, UpdateSession,
+  AskWhy, BurstView, ContractView, Health, LearningView, LedgerRow, ModelStatus,
+  ReverseRejection, SessionView, StartSession, TraceView, TurnView, UpdateSession, WhyView,
 } from "./contract";
 
 export class ApiError extends Error {
@@ -31,6 +31,8 @@ export interface BatonApi {
   contract(sid: string): Promise<ContractView>;
   ledger(sid: string): Promise<LedgerRow[]>;
   reverse(sid: string, body: ReverseRejection): Promise<LedgerRow[]>;
+  why(sid: string, body: AskWhy): Promise<WhyView>;
+  learning(project: string): Promise<LearningView>;
   trace(sid: string): Promise<TraceView>;
   refreshMemory(sid: string): Promise<TraceView>;
 }
@@ -73,6 +75,8 @@ export function createHttpApi(base = "/api", fetchImpl: Fetch = (...a) => fetch(
     contract: (sid) => call("GET", `${s(sid)}/contract`),
     ledger: (sid) => call("GET", `${s(sid)}/ledger`),
     reverse: (sid, body) => call("POST", `${s(sid)}/ledger/reverse`, body),
+    why: (sid, body) => call("POST", `${s(sid)}/ledger/why`, body),
+    learning: (project) => call("GET", `/projects/${encodeURIComponent(project)}/learning`),
     trace: (sid) => call("GET", `${s(sid)}/trace`),
     refreshMemory: (sid) => call("POST", `${s(sid)}/memory/refresh`),
   };

@@ -15,10 +15,13 @@ from baton.interfaces.api import (
     BurstView,
     ContractView,
     Health,
+    LearningPoint,
+    LearningView,
     ReplyView,
     SessionView,
     TraceView,
     TurnView,
+    WhyView,
 )
 from baton.interfaces.types import CheckId, HandoffEvent, Item, ItemKind, L2Snapshot, new_id, utcnow
 
@@ -33,6 +36,9 @@ class Baton:
         self._snapshots: dict[str, L2Snapshot] = {}
         self._turns: dict[str, list[TurnView]] = defaultdict(list)
         self._locks: dict[str, RLock] = defaultdict(RLock)
+        self._why_cache: dict[
+            tuple[str, str], tuple[tuple[str, ...], WhyView]
+        ] = {}
         self.runner = TurnRunner(ai, settings, self._snapshot)
 
     def _snapshot(self, project: str, refresh: bool) -> L2Snapshot:
@@ -232,6 +238,48 @@ class Baton:
         session, snapshot, _state = self._state(session_id)
         l2 = [value for value in snapshot.items if value.session_id != session_id]
         return ledger((*l2, *self.ai.store.items(session_id)))
+
+    def learning(self, project: str) -> LearningView:
+        points = tuple(
+            LearningPoint(
+                model=model,
+                session_id=session_id,
+                at=at,
+                checks=checks,
+                failures=failures,
+            )
+            for model, session_id, at, checks, failures
+            in self.ai.store.first_attempt_rates(project)
+        )
+        return LearningView(
+            stats=tuple(self.ai.store.patch_stats()),
+            points=points,
+        )
+
+    def why(self, session_id: str, item_id: str) -> WhyView:
+        with self._locks[session_id]:
+            session = self.ai.store.get_session(session_id)
+            rows = self.ledger(session_id)
+            row = next((value for value in rows if value.item_id == item_id), None)
+            if row is None:
+                raise KeyError(item_id)
+
+            fingerprint = tuple(value.model_dump_json() for value in rows)
+            key = (session_id, item_id)
+            cached = self._why_cache.get(key)
+            if cached is not None and cached[0] == fingerprint:
+                return cached[1]
+
+            answer = self.ai.memory.why(session.project, row.approach)
+            view = WhyView(
+                item_id=item_id,
+                approach=row.approach,
+                answer=answer.text,
+                sources=answer.sources,
+                error=answer.error,
+            )
+            self._why_cache[key] = (fingerprint, view)
+            return view
 
     def reverse(self, session_id: str, item_id: str, reason: str | None = None):
         session = self.ai.store.get_session(session_id)

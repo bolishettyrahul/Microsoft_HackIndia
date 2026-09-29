@@ -1,6 +1,6 @@
 # Baton: completed work
 
-Last updated 2026-09-30, 01:39 IST. Current delivery target: 09:00 IST on 2026-09-30.
+Last updated 2026-09-30, 01:53 IST. Current delivery target: 09:00 IST on 2026-09-30.
 
 ## AI plan v3 update
 
@@ -13,7 +13,8 @@ The AI-owned work from `planv2.md` and `planv3.md` is implemented. The shared ad
 5. **A4 — OpenAI seam:** `openai:<model>` uses the native OpenAI-compatible endpoint and is visibly disabled with `OPENAI_API_KEY is not configured` when the optional key is absent.
 6. **A6 — model learning persistence:** SQLite upserts pass/trial totals by model, check, and patch level. First-attempt rates exclude repair attempts, memory-OFF attempts, and `n/a` checks.
 7. **A7 — grounded rejection explanations:** Hindsight `reflect` answers “Why did the team reject this?” with the required tags, low budget, 20-second timeout, and source ids.
-8. **Verification:** `23 passed` in `tests/ai`; the combined offline suite is `55 passed, 6 deselected`; `pytest -m live tests/live` is `6 passed`; frontend tests and the production build pass; `compileall` and `pip check` are clean.
+8. **B9/B10 — learning and Why endpoints:** all 22 declared HTTP endpoints are now mounted. Learning returns patch statistics and project first-attempt points. Ledger Why validates the rejection, calls grounded reflection, and caches each answer until the ledger changes. The typed frontend HTTP client and mock expose both calls.
+9. **Verification:** `23 passed` in `tests/ai`; the combined offline suite is `57 passed, 6 deselected`; `pytest -m live tests/live` is `6 passed`; frontend tests and the production build pass; `compileall` and `pip check` are clean.
 
 **A5 support remains active:** rerun the live suite once more after every sector has been merged into `main`, and investigate any provider failure seen during the final rehearsal.
 
@@ -65,7 +66,7 @@ The three added HTTP endpoints are:
 
 **Now implemented in the AI layer:** bridge persistence, patch statistics, first-attempt learning points, the OpenAI provider seam, and grounded "Why?" reflection.
 
-**Not yet integrated across every layer:** backend patch-level selection and learning/why endpoints, the learning chart, seeding, the team view, Ollama, and the full conformance suites.
+**Not yet integrated across every layer:** backend patch-level selection, the learning/Why UI, seeding, the team view, Ollama, and the full conformance suites.
 
 The follow-up request authorized completing the missing backend prerequisites
 without waiting for another sector:
@@ -99,13 +100,14 @@ without waiting for another sector:
 - [ ] Verify end-to-end memory toggle (OFF -> fresh, ON -> contract injection, flip turn -> regenerated reply & items).
 - [ ] Verify end-to-end extraction -> SQLite -> Hindsight retain -> handoff recall -> prompt injection.
 - [ ] Verify rejected/continuity/no_bullets checks and 1-repair retry behavior on real models.
-- [ ] Verify the extra checks, learned patch-level selection, learning endpoint/chart, and ledger "Why?" end to end.
+- [x] Verify the learning and ledger Why HTTP endpoints with fake services and real SQLite/store classes.
+- [ ] Verify the extra checks, learned patch-level selection, learning chart, and ledger Why UI end to end.
 - [ ] Drive the guided rail and learning tab with Playwright in fake-backend mode.
 - [ ] Rehearse full demo path: Copy Baton, Ledger Reverse, Memory Trace, Burst Rate-Limit trigger.
 
 ## Verification completed
 
-**Last full offline test run: 55 passed, 6 live tests deselected.** The frontend has
+**Last full offline test run: 57 passed, 6 live tests deselected.** The frontend has
 `5 passed`, its production build succeeds, and `git diff --check` passes.
 
 ## Next steps

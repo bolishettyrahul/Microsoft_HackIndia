@@ -14,14 +14,17 @@ from baton.backend.bridge_setup import connection_settings, setup_view
 from baton.backend.mcp_server import build_mcp
 from baton.config import load_settings
 from baton.interfaces.api import (
-    ReverseRejection,
+    AskWhy,
+    BridgeSetup,
+    BridgeView,
+    ImportExchange,
+    LearningView,
     SendMessage,
     StartSession,
     UpdateSession,
     UseModel,
-    BridgeView,
-    BridgeSetup,
-    ImportExchange,
+    ReverseRejection,
+    WhyView,
 )
 
 
@@ -37,7 +40,7 @@ def create_app(api: Baton | None = None) -> FastAPI:
                 await stack.enter_async_context(server.session_manager.run())
             yield
 
-    application = FastAPI(title="Baton API", version="2.0", lifespan=lifespan)
+    application = FastAPI(title="Baton API", version="3.0", lifespan=lifespan)
     application.state.mcp_token = token
     build_lock = Lock()
     if api is not None:
@@ -69,6 +72,10 @@ def create_app(api: Baton | None = None) -> FastAPI:
     @application.post("/api/projects/{project}/import", response_model=BridgeView)
     def import_exchange(project: str, body: ImportExchange):
         return call(backend().bridge.import_exchange, project, body.app, body.user_message, body.assistant_reply)
+
+    @application.get("/api/projects/{project}/learning", response_model=LearningView)
+    def learning(project: str):
+        return backend().learning(project)
 
     @application.get("/api/health")
     def health():
@@ -132,6 +139,10 @@ def create_app(api: Baton | None = None) -> FastAPI:
     @application.post("/api/sessions/{sid}/ledger/reverse")
     def reverse(sid: str, body: ReverseRejection):
         return call(backend().reverse, sid, body.item_id, body.reason)
+
+    @application.post("/api/sessions/{sid}/ledger/why", response_model=WhyView)
+    def why(sid: str, body: AskWhy):
+        return call(backend().why, sid, body.item_id)
 
     @application.get("/api/sessions/{sid}/trace")
     def trace(sid: str):

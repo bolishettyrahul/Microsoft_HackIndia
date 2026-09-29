@@ -21,12 +21,16 @@ describe("http client", () => {
     await api.burst("groq:openai/gpt-oss-120b");
     await api.updateSession("s1", { memory_on: false });
     await api.reverse("s1", { item_id: "i1", reason: null });
+    await api.why("s1", { item_id: "i1" });
+    await api.learning("my project");
     expect(calls).toEqual([
       { url: "/api/sessions/s1/turns", method: "POST", body: { text: "hi" } },
       { url: "/api/sessions/s1/models/use", method: "POST", body: { model_id: "groq:openai/gpt-oss-120b" } },
       { url: "/api/models/burst", method: "POST", body: { model_id: "groq:openai/gpt-oss-120b" } },
       { url: "/api/sessions/s1", method: "PATCH", body: { memory_on: false } },
       { url: "/api/sessions/s1/ledger/reverse", method: "POST", body: { item_id: "i1", reason: null } },
+      { url: "/api/sessions/s1/ledger/why", method: "POST", body: { item_id: "i1" } },
+      { url: "/api/projects/my%20project/learning", method: "GET", body: undefined },
     ]);
   });
 
@@ -43,7 +47,10 @@ describe("mock backend plays the demo", () => {
     await api.send(s.session_id, "Plan caching for our FastAPI recall endpoint.");
     await api.send(s.session_id, "No Redis, we're on a free tier. And no bullet lists.");
     await new Promise((r) => setTimeout(r, 5));
-    expect((await api.ledger(s.session_id)).map((r) => r.approach)).toEqual(["Redis"]);
+    const ledger = await api.ledger(s.session_id);
+    expect(ledger.map((r) => r.approach)).toEqual(["Redis"]);
+    expect((await api.why(s.session_id, { item_id: ledger[0].item_id })).answer).toContain("free tier");
+    expect((await api.learning("demo")).points.length).toBeGreaterThan(0);
 
     await api.burst("groq:openai/gpt-oss-120b");
     await api.updateSession(s.session_id, { memory_on: false });
