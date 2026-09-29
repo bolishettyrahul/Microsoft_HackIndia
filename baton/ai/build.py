@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from baton.ai.chain import RuntimeModelChain
@@ -44,7 +45,11 @@ def _model(settings: Any, model_id: str) -> OpenAICompatModel:
     return OpenAICompatModel(profile, _key(settings, profile.provider))
 
 
-def build_ai(settings: Any) -> AIServices:
+def build_ai(
+    settings: Any,
+    *,
+    hindsight_client_factory: Callable[[], Any] | None = None,
+) -> AIServices:
     """Build the long-lived services consumed by the backend."""
     chat_models = [_model(settings, model_id) for model_id in settings.model_chain]
     chain = RuntimeModelChain(chat_models)
@@ -57,10 +62,17 @@ def build_ai(settings: Any) -> AIServices:
     extractor = StructuredExtractor(extractor_models)
     store = SQLiteStore(settings.db_path)
     if settings.hindsight_api_key:
-        memory = HindsightLongTermMemory(
-            settings.hindsight_base_url,
-            settings.hindsight_api_key,
-        )
+        try:
+            memory = HindsightLongTermMemory(
+                settings.hindsight_base_url,
+                settings.hindsight_api_key,
+                client_factory=hindsight_client_factory,
+            )
+        except RuntimeError as error:
+            cause = error.__cause__ or error
+            memory = UnavailableLongTermMemory(
+                f"Hindsight client failed to start: {cause}; using local memory only."
+            )
     else:
         memory = UnavailableLongTermMemory()
     return AIServices(chain=chain, extractor=extractor, store=store, memory=memory)

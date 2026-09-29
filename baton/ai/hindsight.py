@@ -398,17 +398,21 @@ class HindsightLongTermMemory:
 class UnavailableLongTermMemory:
     """Visible L1-only fallback used when no Hindsight key is configured."""
 
-    _ALERT = Alert(
-        level="amber",
-        code=AlertCode.LTM_UNAVAILABLE,
-        message="Hindsight API key is not configured; using local memory only.",
-    )
+    def __init__(
+        self,
+        message: str = "Hindsight API key is not configured; using local memory only.",
+    ) -> None:
+        self._alert = Alert(
+            level="amber",
+            code=AlertCode.LTM_UNAVAILABLE,
+            message=message,
+        )
 
     def ensure_bank(self, project: str) -> list[Alert]:
-        return [self._ALERT]
+        return [self._alert]
 
     def retain(self, project: str, document_id: str, items: Sequence[Item]) -> None:
         return None
 
     def snapshot(self, project: str, *, timeout: float = 5.0) -> L2Snapshot:
-        return L2Snapshot(alerts=(self._ALERT,), fetched_at=utcnow())
+        return L2Snapshot(alerts=(self._alert,), fetched_at=utcnow())
