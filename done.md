@@ -1,6 +1,21 @@
 # Baton: progress so far
 
-Last updated 2026-09-29, 23:25 IST. Submission is due at about 00:15 IST on 2026-09-30.
+Last updated 2026-09-30, 01:30 IST. Current delivery target: 09:00 IST on 2026-09-30.
+
+## AI plan v3 update
+
+The AI-owned work from `planv2.md` and `planv3.md` is implemented. The shared additive v3 contract is also ready for the backend and frontend consumers.
+
+1. **Contracts v3 (`2h-3.0`):** added the bridge, learning, patch-stat, extra-check, and grounded-why types in Python and TypeScript. Configuration now includes the optional OpenAI key and bridge settings.
+2. **A1/A8 — live provider verification:** all six real-service tests pass. The latest run measured Groq `gpt-oss-120b` at 483 ms, Gemini 3.5 Flash at 1,738 ms, Qwen at 504 ms, and Hindsight retain-to-recall at 5.84 s. Both extractor models returned a Redis rejection with a reason. Hindsight reflection returned an answer grounded in eight sources. Detailed observations are in `docs/research/2026-09-30-live-findings.md`.
+3. **A2 — safe Hindsight fallback:** startup, recall, retain, timeout, unavailable-service, and no-credit paths remain outside the app's failure path. `why()` also returns a visible error object and never raises.
+4. **A3 — bridge persistence:** SQLite now exposes project-wide contract items across sessions and persists ordered bridge events.
+5. **A4 — OpenAI seam:** `openai:<model>` uses the native OpenAI-compatible endpoint and is visibly disabled with `OPENAI_API_KEY is not configured` when the optional key is absent.
+6. **A6 — model learning persistence:** SQLite upserts pass/trial totals by model, check, and patch level. First-attempt rates exclude repair attempts, memory-OFF attempts, and `n/a` checks.
+7. **A7 — grounded rejection explanations:** Hindsight `reflect` answers “Why did the team reject this?” with the required tags, low budget, 20-second timeout, and source ids.
+8. **Verification:** `23 passed` in `tests/ai`; the complete offline suite is `30 passed, 6 deselected`; `pytest -m live tests/live` is `6 passed`; `compileall` and `pip check` are clean.
+
+**A5 support remains active:** rerun the live suite once more after every sector has been merged into `main`, and investigate any provider failure seen during the final rehearsal.
 
 ## Decisions
 
@@ -76,35 +91,40 @@ Backend verification command: `python -m pytest -q tests/backend` (expected chec
 - Hindsight retain and recall, falling back to SQLite only with an alert.
 - Baton, Ledger and Memory trace tabs, and Copy baton.
 
-**Out:** the patch statistics and learning chart, seeding, the team view, "Why?", Ollama, and the full conformance suites.
+**Now implemented in the AI layer:** bridge persistence, patch statistics, first-attempt learning points, the OpenAI provider seam, and grounded "Why?" reflection.
+
+**Not yet integrated across every layer:** backend patch-level selection and learning/why endpoints, the learning chart, seeding, the team view, Ollama, and the full conformance suites.
 
 ## Tests remaining & Integration checklist
 
 ### AI live tests (requires API keys in `.env`)
-- [ ] Groq smoke calls for `openai/gpt-oss-120b`, `openai/gpt-oss-20b`, and `qwen/qwen3.8-27b`.
-- [ ] Gemini smoke calls for `gemini-3.5-flash` and `gemini-3.5-flash-lite`, including strict structured output.
-- [ ] Verify real 429 parsing and `retry-after` behavior for Groq and Gemini.
-- [ ] Run the Groq burst once and confirm the model enters cooldown without exhausting quota.
-- [ ] Create/ensure Hindsight bank, retain one typed turn, and recall with tags and metadata intact.
-- [ ] Verify dedicated event-loop thread handling for Hindsight with visible L1 fallback on timeout.
+- [x] Groq smoke calls for `openai/gpt-oss-120b`, `openai/gpt-oss-20b`, and `qwen/qwen3.8-27b`.
+- [x] Gemini smoke calls for `gemini-3.5-flash` and `gemini-3.5-flash-lite`, including strict structured output.
+- [x] Create/ensure a Hindsight bank, retain typed items, recall tags and metadata intact, and reflect a grounded "Why?" answer.
+- [x] Verify the dedicated event-loop thread and visible L1 fallback for startup failure, timeout, service failure, and HTTP 402.
+- [ ] Intentionally trigger a real provider 429 and confirm its live `retry-after` value. Unit coverage passes; the live suite avoids spending the recording quota solely to cause failure.
+- [ ] Run the Groq burst during the final rehearsal and confirm the model enters cooldown without exhausting the recording key.
+- [ ] Rerun all six live tests after the final backend and frontend merge.
 
 ### Cross-sector integration tests
-- [ ] Merge AI, backend and frontend branches into `main`.
+- [ ] Merge the remaining backend and frontend v3 work into `main` (the AI v3 work is ready).
 - [ ] Run complete test suite (`pytest tests/ai tests/backend` + `npm test` in `web/`).
 - [ ] Run FastAPI backend (`uvicorn baton.backend.app:app`) against real `AIServices` and verify live React UI (`npm run dev:live`).
 - [ ] Verify end-to-end memory toggle (OFF -> fresh, ON -> contract injection, flip turn -> regenerated reply & items).
 - [ ] Verify end-to-end extraction -> SQLite -> Hindsight retain -> handoff recall -> prompt injection.
 - [ ] Verify rejected/continuity/no_bullets checks and 1-repair retry behavior on real models.
+- [ ] Verify the extra checks, learned patch-level selection, learning endpoint/chart, and ledger "Why?" end to end.
+- [ ] Drive the guided rail and learning tab with Playwright in fake-backend mode.
 - [ ] Rehearse full demo path: Copy Baton, Ledger Reverse, Memory Trace, Burst Rate-Limit trigger.
 
 ## Next
 
-1. Merge `ai`, `backend`, and `frontend` branches into `main`.
-2. Populate `.env` with live keys (`GROQ_API_KEY`, `GEMINI_API_KEY`, `HINDSIGHT_API_KEY`) for live rehearsal.
-3. Run cross-sector integration and fix any wiring issues between backend and AI.
-4. Prepare README, record demo video, and submit before deadline (~00:15 IST).
+1. Merge the AI v3 commit, then the remaining backend and frontend v3 branches into `main`.
+2. Run cross-sector integration and fix any wiring issues against the already configured local keys.
+3. Complete the bridge connection and UI rehearsal, then rerun the live AI suite.
+4. Prepare README, record the demo video, and submit before 09:00 IST.
 
 ## Needed from you
 
 - Pause OneDrive syncing if active. Otherwise it fights `node_modules`, `.venv` and SQLite.
-- Fill the root `.env` with `GROQ_API_KEY`, `GEMINI_API_KEY` and `HINDSIGHT_API_KEY`. Never commit it.
+- Keep the configured root `.env` local. Never commit or paste its API keys.
